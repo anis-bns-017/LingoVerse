@@ -1,0 +1,35 @@
+{
+  "name": "LingoVerse",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "clean": "turbo clean && rimraf node_modules"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.17.0",
+      "onFail": "download"
+    }
+  },
+  "type": "module",
+  "devDependencies": {
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.6",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "expo": "^57.0.8",
+    "react": "^19.2.8",
+    "react-native": "^0.86.0"
+  }
+}

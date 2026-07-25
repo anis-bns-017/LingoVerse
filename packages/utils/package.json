@@ -1,0 +1,9 @@
+{
+  "name": "@lingoverse/utils",
+  "version": "0.0.1",
+  "main": "./src/index.ts",
+  "devDependencies": {
+    "@lingoverse/types": "workspace:*",
+    "typescript": "^5.4.5"
+  }
+}

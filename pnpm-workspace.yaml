@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "server"
+allowBuilds:
+  '@prisma/engines': false
+  bcrypt: set this to true or false
+  msgpackr-extract: set this to true or false
+  prisma: false
+  unrs-resolver: true
