@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';  // 👈 ADD THIS
 import { useAuth } from '../contexts/AuthContext';
 
 export const RegisterPage = () => {
@@ -10,17 +11,15 @@ export const RegisterPage = () => {
     confirmPassword: '',
     nativeLanguage: 'en',
   });
-  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
 
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+      toast.error('Passwords do not match');  // 👈 ADD THIS
       return;
     }
 
@@ -34,9 +33,10 @@ export const RegisterPage = () => {
         nativeLanguage: formData.nativeLanguage,
         learningLanguages: ['en'],
       });
+      toast.success('Account created! Welcome to LingoVerse 🚀');  // 👈 ADD THIS
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed');
+      toast.error(err.response?.data?.message || 'Registration failed');  // 👈 ADD THIS
     } finally {
       setIsLoading(false);
     }
@@ -51,12 +51,6 @@ export const RegisterPage = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="bg-red-50 text-red-500 p-3 rounded-md text-sm">
-              {error}
-            </div>
-          )}
-
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700">
               Full Name
@@ -68,6 +62,7 @@ export const RegisterPage = () => {
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
+              placeholder="John Doe"
             />
           </div>
 
@@ -82,6 +77,7 @@ export const RegisterPage = () => {
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
+              placeholder="you@example.com"
             />
           </div>
 
@@ -97,6 +93,7 @@ export const RegisterPage = () => {
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
               minLength={6}
+              placeholder="Min 6 characters"
             />
           </div>
 
@@ -117,7 +114,7 @@ export const RegisterPage = () => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
           >
             {isLoading ? 'Creating account...' : 'Create Account'}
           </button>
