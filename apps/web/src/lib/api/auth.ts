@@ -15,8 +15,7 @@ export interface LoginData {
 
 export interface AuthResponse {
   user: any;
-  accessToken: string;
-  refreshToken: string;
+  // no tokens in response; they are in cookies
 }
 
 export const authApi = {
@@ -25,9 +24,6 @@ export const authApi = {
 
   login: (data: LoginData) =>
     apiClient.post<AuthResponse>('/auth/login', data),
-
-  refresh: (refreshToken: string) =>
-    apiClient.post<AuthResponse>('/auth/refresh', { refreshToken }),
 
   logout: () =>
     apiClient.post('/auth/logout'),

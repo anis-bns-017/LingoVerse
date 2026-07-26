@@ -31,45 +31,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     const loadUser = async () => {
-      const token = localStorage.getItem('accessToken');
-      if (token) {
-        try {
-          const response = await authApi.getMe();
-          setUser(response.data);
-        } catch (error) {
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
-        }
+      try {
+        const response = await authApi.getMe();
+        setUser(response.data);
+      } catch (error) {
+        // Not authenticated
+        setUser(null);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
     loadUser();
   }, []);
 
   const login = async (email: string, password: string) => {
     const response = await authApi.login({ email, password });
-    const { user, accessToken, refreshToken } = response.data;
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
-    setUser(user);
+    // Tokens are set as cookies automatically
+    setUser(response.data.user);
   };
 
   const register = async (data: any) => {
     const response = await authApi.register(data);
-    const { user, accessToken, refreshToken } = response.data;
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
-    setUser(user);
+    setUser(response.data.user);
   };
 
   const logout = async () => {
     try {
       await authApi.logout();
     } catch (error) {
-      // Ignore logout errors
+      // Ignore
     }
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
     setUser(null);
   };
 

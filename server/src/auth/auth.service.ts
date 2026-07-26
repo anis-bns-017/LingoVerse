@@ -14,9 +14,9 @@ import { LoginDto } from './dto/login.dto';
 @Injectable()
 export class AuthService {
   constructor(
-    private prisma: PrismaService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -76,7 +76,10 @@ export class AuthService {
       throw new UnauthorizedException('Please use social login');
     }
 
-    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -99,8 +102,11 @@ export class AuthService {
   async refreshToken(refreshToken: string) {
     try {
       // Verify refresh token
-      const payload = this.jwtService.verify(refreshToken, {
-        secret: this.configService.get<string>('REFRESH_TOKEN_SECRET'),
+      const payload = this.jwtService.verify<{
+        sub: string;
+        email: string;
+      }>(refreshToken, {
+        secret: this.configService.getOrThrow<string>('REFRESH_TOKEN_SECRET'),
       });
 
       // Find user
@@ -145,26 +151,31 @@ export class AuthService {
   }
 
   private async generateTokens(userId: string, email: string) {
-    const payload = { sub: userId, email };
+    const payload = {
+      sub: userId,
+      email,
+    };
 
-    const accessToken = this.jwtService.sign(payload);
-    const refreshToken = this.jwtService.sign(payload, {
-      secret: this.configService.get<string>('REFRESH_TOKEN_SECRET'),
-      expiresIn: this.configService.get<string>('REFRESH_EXPIRES_IN', '30d'),
+    const accessToken = await this.jwtService.signAsync(payload);
+
+    const refreshToken = await this.jwtService.signAsync(payload, {
+      secret: this.configService.getOrThrow<string>('REFRESH_TOKEN_SECRET'),
+      expiresIn: this.configService.getOrThrow<'30d'>('REFRESH_EXPIRES_IN'),
     });
 
-    // Store session (simplified - we'll enhance later)
     await this.prisma.session.create({
       data: {
         userId,
         token: refreshToken,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
     });
 
-    return { accessToken, refreshToken };
+    return {
+      accessToken,
+      refreshToken,
+    };
   }
-
   private sanitizeUser(user: any) {
     const { passwordHash, ...safeUser } = user;
     return safeUser;

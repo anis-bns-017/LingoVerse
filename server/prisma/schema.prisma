@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -47,18 +46,34 @@ model Account {
 }
 
 model Profile {
-  id                  String   @id @default(cuid())
-  userId              String   @unique
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  country             String?
-  nativeLanguage      String?
-  learningLanguages   String[]
-  interests           String[]
-  goals               String[]
-  bio                 String?
-  xp                  Int      @default(0)
-  streak              Int      @default(0)
-  lastActive          DateTime @default(now())
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country           String?
+  nativeLanguage    String?
+  learningLanguages String[]
+  interests         String[]
+  goals             String[]
+  bio               String?
+  xp                Int      @default(0)
+  streak            Int      @default(0)
+  lastActive        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Settings {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailNotifications      Boolean  @default(true)
+  pushNotifications       Boolean  @default(true)
+  soundEffects            Boolean  @default(true)
+  theme                   String   @default("system")
+  language                String   @default("en")
+  dailyReminderTime       String[]
+  shareActivityWithFriends Boolean @default(true)
+  showOnlineStatus        Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 }
