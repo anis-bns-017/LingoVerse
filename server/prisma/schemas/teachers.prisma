@@ -1,40 +1,7 @@
-model Teacher {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bio           String?
-  hourlyRate    Float?
-  currency      String   @default("USD")
-  isVerified    Boolean  @default(false)
-  verificationStatus VerificationStatus @default(PENDING)
-  verificationDocument String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  bookings      Booking[]
-  liveClasses   LiveClass[]
-  reviews       Review[]
-  schedules     Schedule[]
-}
-
 enum VerificationStatus {
   PENDING
   APPROVED
   REJECTED
-}
-
-model Booking {
-  id         String   @id @default(cuid())
-  teacherId  String
-  teacher    Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  studentId  String
-  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  scheduledAt DateTime
-  duration   Int      // minutes
-  status     BookingStatus @default(PENDING)
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
 }
 
 enum BookingStatus {
@@ -42,21 +9,7 @@ enum BookingStatus {
   CONFIRMED
   CANCELLED
   COMPLETED
-}
-
-model LiveClass {
-  id         String   @id @default(cuid())
-  teacherId  String
-  teacher    Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  title      String
-  description String?
-  scheduledAt DateTime
-  duration   Int
-  meetingUrl String?
-  recordingUrl String?
-  status     LiveClassStatus @default(SCHEDULED)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  NO_SHOW
 }
 
 enum LiveClassStatus {
@@ -66,60 +19,141 @@ enum LiveClassStatus {
   CANCELLED
 }
 
-model Homework {
-  id         String   @id @default(cuid())
-  liveClassId String
-  liveClass  LiveClass @relation(fields: [liveClassId], references: [id], onDelete: Cascade)
-  title      String
-  description String?
-  dueDate    DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  submissions HomeworkSubmission[]
-}
-
-model HomeworkSubmission {
-  id         String   @id @default(cuid())
-  homeworkId String
-  homework   Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
-  studentId  String
-  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  content    String?
-  fileUrl    String?
-  submittedAt DateTime @default(now())
-  grade      Float?
-  feedback   String?
-  gradedAt   DateTime?
-  status     SubmissionStatus @default(SUBMITTED)
-}
-
 enum SubmissionStatus {
   SUBMITTED
   GRADED
   RETURNED
+  LATE
+}
+
+model Teacher {
+  id                      String               @id @default(cuid())
+  userId                  String               @unique
+  user                    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio                     String?
+  headline                String?
+  specialties             String[]
+  languages               String[]
+  experienceYears         Int                  @default(0)
+  hourlyRate              Float?
+  currency                String               @default("USD")
+  averageRating           Float                @default(0)
+  totalReviews            Int                  @default(0)
+  totalStudents           Int                  @default(0)
+  totalLessons            Int                  @default(0)
+  isVerified              Boolean              @default(false)
+  verificationStatus      VerificationStatus   @default(PENDING)
+  verificationDocument    String?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  bookings                Booking[]
+  liveClasses             LiveClass[]
+  reviews                 Review[]
+  schedules               Schedule[]
+}
+
+model Booking {
+  id                      String          @id @default(cuid())
+  teacherId               String
+  teacher                 Teacher         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId               String
+  student                 User            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  scheduledAt             DateTime
+  duration                Int
+  status                  BookingStatus   @default(PENDING)
+  meetingUrl              String?
+  notes                   String?
+  cancelledReason         String?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  @@index([teacherId])
+  @@index([studentId])
+  @@index([scheduledAt])
+}
+
+model LiveClass {
+  id                      String             @id @default(cuid())
+  teacherId               String
+  teacher                 Teacher           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  title                   String
+  description             String?
+  language                String?
+  level                   String?
+  maxStudents             Int?
+  scheduledAt             DateTime
+  duration                Int
+  meetingUrl              String?
+  recordingUrl            String?
+  status                  LiveClassStatus   @default(SCHEDULED)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  homeworks               Homework[]
+
+  @@index([teacherId])
+  @@index([scheduledAt])
+}
+
+model Homework {
+  id                      String                 @id @default(cuid())
+  liveClassId             String
+  liveClass               LiveClass              @relation(fields: [liveClassId], references: [id], onDelete: Cascade)
+  title                   String
+  description             String?
+  dueDate                 DateTime
+  maxScore                Float                 @default(100)
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  submissions             HomeworkSubmission[]
+}
+
+model HomeworkSubmission {
+  id                      String               @id @default(cuid())
+  homeworkId              String
+  homework                Homework            @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  studentId               String
+  student                 User                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  content                 String?
+  fileUrl                 String?
+  submittedAt             DateTime            @default(now())
+  grade                   Float?
+  feedback                String?
+  gradedAt                DateTime?
+  status                  SubmissionStatus    @default(SUBMITTED)
+
+  @@unique([homeworkId, studentId])
+  @@index([studentId])
 }
 
 model Review {
-  id         String   @id @default(cuid())
-  teacherId  String
-  teacher    Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  studentId  String
-  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  rating     Int      // 1-5
-  comment    String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                      String      @id @default(cuid())
+  teacherId               String
+  teacher                 Teacher     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId               String
+  student                 User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  rating                  Int
+  comment                 String?
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  @@unique([teacherId, studentId])
+  @@index([teacherId])
 }
 
 model Schedule {
-  id         String   @id @default(cuid())
-  teacherId  String
-  teacher    Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  dayOfWeek  Int      // 0-6
-  startTime  String   // "09:00"
-  endTime    String   // "17:00"
-  isRecurring Boolean @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                      String      @id @default(cuid())
+  teacherId               String
+  teacher                 Teacher     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  dayOfWeek               Int
+  startTime               String
+  endTime                 String
+  timezone                String      @default("UTC")
+  isRecurring             Boolean     @default(true)
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  @@index([teacherId])
 }

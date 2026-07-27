@@ -1,32 +1,54 @@
+enum Theme {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
 model Profile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  country           String?
-  nativeLanguage    String?
-  learningLanguages String[]
-  interests         String[]
-  goals             String[]
-  bio               String?
-  xp                Int      @default(0)
-  streak            Int      @default(0)
-  lastActive        DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                  String     @id @default(cuid())
+  userId              String     @unique
+  user                User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username            String?    @unique
+  displayName         String?
+  country             String?
+  city                String?
+  timezone            String?
+  bio                 String?
+  avatarUrl           String?
+  coverImageUrl       String?
+  dateOfBirth         DateTime?
+  nativeLanguage      String?
+  learningLanguages   String[]
+  interests           String[]
+  goals               String[]
+  level               String?
+  xp                  Int        @default(0)
+  streak              Int        @default(0)
+  followersCount      Int        @default(0)
+  followingCount      Int        @default(0)
+  isVerified          Boolean    @default(false)
+  lastActive          DateTime   @default(now())
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 }
 
 model Settings {
-  id                      String   @id @default(cuid())
-  userId                  String   @unique
-  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailNotifications      Boolean  @default(true)
-  pushNotifications       Boolean  @default(true)
-  soundEffects            Boolean  @default(true)
-  theme                   String   @default("system")
-  language                String   @default("en")
-  dailyReminderTime       String[]
-  shareActivityWithFriends Boolean @default(true)
-  showOnlineStatus        Boolean  @default(true)
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  id                        String    @id @default(cuid())
+  userId                    String    @unique
+  user                      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme                     Theme     @default(SYSTEM)
+  language                  String    @default("en")
+  emailNotifications        Boolean   @default(true)
+  pushNotifications         Boolean   @default(true)
+  soundEffects              Boolean   @default(true)
+  dailyReminderEnabled      Boolean   @default(true)
+  dailyReminderTime         String?
+  shareActivityWithFriends  Boolean   @default(true)
+  showOnlineStatus          Boolean   @default(true)
+  showProfilePublic         Boolean   @default(true)
+  allowFriendRequests       Boolean   @default(true)
+  allowDirectMessages       Boolean   @default(true)
+  autoTranslateMessages     Boolean   @default(false)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 }

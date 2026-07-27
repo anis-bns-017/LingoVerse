@@ -1,83 +1,152 @@
-model XpTransaction {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amount      Int
-  reason      String   // exercise completed, streak, etc.
-  metadata    String?  // JSON
-  createdAt   DateTime @default(now())
+enum XpReason {
+  LESSON_COMPLETED
+  QUIZ_COMPLETED
+  ASSIGNMENT_COMPLETED
+  STREAK_REWARD
+  DAILY_LOGIN
+  CHALLENGE_COMPLETED
+  COURSE_COMPLETED
+  VOCABULARY_MASTERED
+  FLASHCARD_REVIEW
+  BONUS
 }
 
-model UserBadge {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  badgeId     String
-  badge       Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
-  earnedAt    DateTime @default(now())
-  progress    Int      @default(0)
+enum BadgeCategory {
+  LEARNING
+  STREAK
+  SPEAKING
+  VOCABULARY
+  GRAMMAR
+  COMMUNITY
+  COURSE
+  SPECIAL
+}
+
+enum BadgeType {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  DIAMOND
+}
+
+enum ChallengeType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  SPECIAL
+}
+
+enum LeaderboardPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  ALL_TIME
+}
+
+model XpTransaction {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount    Int
+  reason    XpReason
+  metadata  Json?
+  createdAt DateTime   @default(now())
+
+  @@index([userId])
+  @@index([reason])
 }
 
 model Badge {
-  id          String   @id @default(cuid())
-  name        String   @unique   // 👈 ADD THIS
-  description String
-  icon        String
-  category    String
-  requirement Int
-  type        String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String        @id @default(cuid())
+  name         String        @unique
+  description  String
+  icon         String
+  category     BadgeCategory
+  requirement  Int
+  type         BadgeType
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  userBadges  UserBadge[]
+  userBadges   UserBadge[]
+
+  @@index([category])
+}
+
+model UserBadge {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badgeId   String
+  badge     Badge     @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  progress  Int       @default(0)
+  earnedAt  DateTime  @default(now())
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@index([badgeId])
 }
 
 model Challenge {
-  id          String   @id @default(cuid())
+  id          String          @id @default(cuid())
   title       String
   description String
-  type        String   // daily, weekly, special
+  type        ChallengeType
   goal        Int
-  reward      Int      // XP or coins
+  reward      Int
   startsAt    DateTime
   endsAt      DateTime
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
   progress    ChallengeProgress[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([type])
+  @@index([startsAt])
+  @@index([endsAt])
 }
 
 model ChallengeProgress {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  challengeId String
-  challenge   Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
-  progress    Int      @default(0)
-  completed   Boolean  @default(false)
-  completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challengeId  String
+  challenge    Challenge   @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  progress     Int         @default(0)
+  completed    Boolean     @default(false)
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([userId, challengeId])
+  @@index([userId])
+  @@index([challengeId])
 }
 
 model Streak {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  currentStreak Int    @default(0)
-  longestStreak Int    @default(0)
-  lastActivity DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentStreak  Int       @default(0)
+  longestStreak  Int       @default(0)
+  lastActivity   DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([currentStreak])
 }
 
 model Leaderboard {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  period      String   // daily, weekly, monthly, all-time
-  score       Int      @default(0)
-  rank        Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String              @id @default(cuid())
+  userId     String
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period     LeaderboardPeriod
+  score      Int                 @default(0)
+  rank       Int                 @default(0)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@unique([userId, period])
+  @@index([period])
+  @@index([rank])
+  @@index([score])
 }

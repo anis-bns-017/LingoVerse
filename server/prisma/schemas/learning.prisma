@@ -1,128 +1,160 @@
-model Vocabulary {
-  id          String   @id @default(cuid())
-  word        String
-  translation String
-  language    String   // language code
-  languageRef Language @relation(fields: [language], references: [code])
-  exampleSentence String?
-  audioUrl    String?
-  difficulty  String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([word, language])
-}
-
-model Flashcard {
-  id          String   @id @default(cuid())
-  front       String
-  back        String
-  language    String
-  userId      String
-  user        User     @relation("FlashcardCreator", fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  reviews     FlashcardReview[]
-}
-
-model FlashcardReview {
-  id          String   @id @default(cuid())
-  flashcardId String
-  flashcard   Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
-  vocabularyId String?
-  vocabulary  Vocabulary? @relation(fields: [vocabularyId], references: [id], onDelete: SetNull)
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  easeFactor  Float    @default(2.5)
-  interval    Int      @default(0) // days
-  lastReviewedAt DateTime? @default(now())
-  dueAt       DateTime @default(now())
-  reviewCount Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model SpacedRepetition {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  itemType    String   // vocabulary, flashcard, grammar
-  itemId      String
-  lastReview  DateTime @default(now())
-  nextReview  DateTime
-  interval    Int      // days
-  easeFactor  Float    @default(2.5)
-  reviewCount Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([userId, itemType, itemId])
-}
-
-model GrammarRule {
-  id          String   @id @default(cuid())
-  title       String
-  description String
-  examples    String[]
-  language    String
-  level       String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model Exercise {
-  id          String   @id @default(cuid())
-  type        ExerciseType
-  language    String
-  title       String
-  description String?
-  content     String   // JSON depending on type
-  difficulty  String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum DifficultyLevel {
+    BEGINNER
+    INTERMEDIATE
+    ADVANCED
 }
 
 enum ExerciseType {
-  GRAMMAR
-  VOCABULARY
-  READING
-  LISTENING
-  WRITING
-  SPEAKING
+    GRAMMAR
+    VOCABULARY
+    READING
+    LISTENING
+    WRITING
+    SPEAKING
 }
 
-model Progress {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  language    String
-  skill       String   // vocabulary, grammar, reading, etc.
-  level       String
-  xp          Int      @default(0)
-  completedExercises Int @default(0)
-  mastered    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum LearningItemType {
+    VOCABULARY
+    FLASHCARD
+    GRAMMAR
 }
 
 model Language {
-  code       String   @id
-  name       String
-  nativeName String
-  flag       String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+    code String @id
+    name String
+    nativeName String
+    flag String?
+    vocabulary Vocabulary[]
+    flashcards Flashcard[]
+    grammarRules GrammarRule[]
+    exercises Exercise[]
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 
-  vocabulary Vocabulary[]
+    @@index([name])
 }
 
+model Vocabulary {
+    id String @id @default(cuid())
+    word String
+    translation String
+    language String
+    languageRef Language @relation(fields: [language], references: [code], onDelete: Cascade)
+    exampleSentence String?
+    audioUrl String?
+    difficulty DifficultyLevel
+    reviews FlashcardReview[]
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 
-enum ExerciseType {
-  GRAMMAR
-  VOCABULARY
-  READING
-  LISTENING
-  WRITING
-  SPEAKING
+    @@unique([word, language])
+    @@index([language])
+    @@index([difficulty])
+}
+
+model Flashcard {
+    id String @id @default(cuid())
+    front String
+    back String
+    language String
+    languageRef Language @relation(fields: [language], references: [code], onDelete: Cascade)
+    userId String
+    user User @relation("FlashcardCreator", fields: [userId], references: [id], onDelete: Cascade)
+    reviews FlashcardReview[]
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([userId])
+    @@index([language])
+}
+
+model FlashcardReview {
+    id String @id @default(cuid())
+    flashcardId String
+    flashcard Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+    vocabularyId String?
+    vocabulary Vocabulary? @relation(fields: [vocabularyId], references: [id], onDelete: SetNull)
+    userId String
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    easeFactor Float @default(2.5)
+    interval Int @default(0)
+    lastReviewedAt DateTime? @default(now())
+    dueAt DateTime @default(now())
+    reviewCount Int @default(0)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([flashcardId, userId])
+    @@index([userId])
+    @@index([dueAt])
+    @@index([vocabularyId])
+}
+
+model SpacedRepetition {
+    id String @id @default(cuid())
+    userId String
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    itemType LearningItemType
+    itemId String
+    lastReview DateTime @default(now())
+    nextReview DateTime
+    interval Int
+    easeFactor Float @default(2.5)
+    reviewCount Int @default(0)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([userId, itemType, itemId])
+    @@index([userId])
+    @@index([nextReview])
+}
+
+model GrammarRule {
+    id String @id @default(cuid())
+    title String
+    description String
+    examples String[]
+    language String
+    languageRef Language @relation(fields: [language], references: [code], onDelete: Cascade)
+    level DifficultyLevel
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([language])
+    @@index([level])
+}
+
+model Exercise {
+    id String @id @default(cuid())
+    type ExerciseType
+    language String
+    languageRef Language @relation(fields: [language], references: [code], onDelete: Cascade)
+    title String
+    description String?
+    content Json
+    difficulty DifficultyLevel
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([language])
+    @@index([type])
+    @@index([difficulty])
+}
+
+model Progress {
+    id String @id @default(cuid())
+    userId String
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+    language String
+    skill String
+    level DifficultyLevel
+    xp Int @default(0)
+    completedExercises Int @default(0)
+    mastered Boolean @default(false)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([userId, language, skill])
+    @@index([userId])
+    @@index([language])
 }

@@ -1,36 +1,30 @@
-model Payment {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amount      Float
-  currency    String   @default("USD")
-  status      PaymentStatus @default(PENDING)
-  method      String   // stripe, paypal, apple_pay, google_pay
-  reference   String?  // stripe payment intent id
-  metadata    String?  // JSON
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
 enum PaymentStatus {
   PENDING
+  PROCESSING
   SUCCEEDED
   FAILED
+  CANCELLED
   REFUNDED
+  PARTIALLY_REFUNDED
 }
 
-model Subscription {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan        String   // free, basic, pro, enterprise
-  status      SubscriptionStatus @default(ACTIVE)
-  startsAt    DateTime @default(now())
-  expiresAt   DateTime?
-  cancelAt    DateTime?
-  stripeSubscriptionId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum PaymentMethod {
+  STRIPE
+  PAYPAL
+  APPLE_PAY
+  GOOGLE_PAY
+  SSLCOMMERZ
+  BKASH
+  NAGAD
+  ROCKET
+  BANK_TRANSFER
+}
+
+enum SubscriptionPlan {
+  FREE
+  BASIC
+  PRO
+  ENTERPRISE
 }
 
 enum SubscriptionStatus {
@@ -38,43 +32,17 @@ enum SubscriptionStatus {
   CANCELLED
   EXPIRED
   PAST_DUE
-}
-
-model Invoice {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscriptionId String?
-  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  amount      Float
-  currency    String   @default("USD")
-  status      InvoiceStatus @default(UNPAID)
-  issuedAt    DateTime @default(now())
-  paidAt      DateTime?
-  dueDate     DateTime
-  stripeInvoiceId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  PAUSED
+  TRIALING
 }
 
 enum InvoiceStatus {
+  DRAFT
   UNPAID
   PAID
   OVERDUE
+  VOID
   CANCELLED
-}
-
-model Payout {
-  id          String   @id @default(cuid())
-  teacherId   String
-  teacher     Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  amount      Float
-  currency    String   @default("USD")
-  status      PayoutStatus @default(PENDING)
-  stripePayoutId String?
-  metadata    String?  // JSON
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }
 
 enum PayoutStatus {
@@ -82,4 +50,81 @@ enum PayoutStatus {
   PROCESSING
   COMPLETED
   FAILED
+  CANCELLED
+}
+
+model Payment {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount       Float
+  currency     String          @default("USD")
+  status       PaymentStatus   @default(PENDING)
+  method       PaymentMethod
+  reference    String?         @unique
+  metadata     Json?
+  description  String?
+  paidAt       DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([method])
+}
+
+model Subscription {
+  id                     String               @id @default(cuid())
+  userId                 String
+  user                   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   SubscriptionPlan
+  status                 SubscriptionStatus   @default(ACTIVE)
+  startsAt               DateTime             @default(now())
+  expiresAt              DateTime?
+  cancelAt               DateTime?
+  stripeSubscriptionId   String?              @unique
+  invoices               Invoice[]
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Invoice {
+  id                String          @id @default(cuid())
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId    String?
+  subscription      Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  amount            Float
+  currency          String          @default("USD")
+  status            InvoiceStatus   @default(UNPAID)
+  issuedAt          DateTime        @default(now())
+  dueDate           DateTime
+  paidAt            DateTime?
+  stripeInvoiceId   String?         @unique
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([status])
+}
+
+model Payout {
+  id                String         @id @default(cuid())
+  teacherId         String
+  teacher           Teacher        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  amount            Float
+  currency          String         @default("USD")
+  status            PayoutStatus   @default(PENDING)
+  stripePayoutId    String?        @unique
+  metadata          Json?
+  processedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([teacherId])
+  @@index([status])
 }
