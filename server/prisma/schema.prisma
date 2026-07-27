@@ -4,76 +4,23 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  passwordHash  String?
-  name          String
-  avatarUrl     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  profile       Profile?
-  sessions      Session[]
-  accounts      Account[]
-}
-
-model Session {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-}
-
-model Account {
-  id                String   @id @default(cuid())
-  userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider          String
-  providerAccountId String
-  type              String
-  accessToken       String?
-  refreshToken      String?
-  expiresAt         Int?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  @@unique([provider, providerAccountId])
-}
-
-model Profile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  country           String?
-  nativeLanguage    String?
-  learningLanguages String[]
-  interests         String[]
-  goals             String[]
-  bio               String?
-  xp                Int      @default(0)
-  streak            Int      @default(0)
-  lastActive        DateTime @default(now())
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-}
-
-model Settings {
-  id                      String   @id @default(cuid())
-  userId                  String   @unique
-  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emailNotifications      Boolean  @default(true)
-  pushNotifications       Boolean  @default(true)
-  soundEffects            Boolean  @default(true)
-  theme                   String   @default("system")
-  language                String   @default("en")
-  dailyReminderTime       String[]
-  shareActivityWithFriends Boolean @default(true)
-  showOnlineStatus        Boolean  @default(true)
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
-}
+// ============ IMPORTS ============
+import { User, Session, Account }              from "./schemas/auth.prisma";
+import { Profile, Settings }                   from "./schemas/profile.prisma";
+import { Friend, FriendRequest, Block }        from "./schemas/friends.prisma";
+import { Chat, ChatParticipant, Message, Reaction, ReadReceipt, MessageTranslation, MessageAttachment } from "./schemas/chat.prisma";
+import { VoiceRoom, VoiceParticipant, Stage, Recording } from "./schemas/voice.prisma";
+import { Community, Channel, Thread, CommunityMember, CommunityRole, CommunityBan } from "./schemas/communities.prisma";
+import { Teacher, Booking, LiveClass, Homework, HomeworkSubmission, Review, Schedule } from "./schemas/teachers.prisma";
+import { Course, Lesson, Quiz, Question, Assignment, AssignmentSubmission, Certificate, Enrollment, LessonProgress, QuizAttempt } from "./schemas/courses.prisma";
+import { Language, Vocabulary, Flashcard, FlashcardReview, SpacedRepetition, GrammarRule, Exercise, Progress, Streak as LearningStreak } from "./schemas/learning.prisma";
+import { AiChat, AiSession, AiFeedback, Recommendation, StudyPlan, Analysis } from "./schemas/ai.prisma";
+import { XpTransaction, UserBadge, Challenge, ChallengeProgress, Streak as GamificationStreak, Leaderboard, Badge } from "./schemas/gamification.prisma";
+import { Product, Cart, Order, Wishlist, ProductReview } from "./schemas/marketplace.prisma";
+import { Payment, Subscription, Invoice, Payout } from "./schemas/payments.prisma";
+import { Report, FlaggedContent, ModerationLog, ModerationRule } from "./schemas/moderation.prisma";
+import { UserAnalytics, DailyMetric, WeeklyReport, LearningAnalytics } from "./schemas/analytics.prisma";
+import { Notification, NotificationPreference, PushToken } from "./schemas/notifications.prisma";

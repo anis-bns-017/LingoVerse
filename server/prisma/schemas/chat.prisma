@@ -1,0 +1,108 @@
+model Chat {
+  id         String   @id @default(cuid())
+  type       ChatType @default(PRIVATE)
+  name       String?
+  avatarUrl  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  participants ChatParticipant[]
+  messages     Message[]
+}
+
+enum ChatType {
+  PRIVATE
+  GROUP
+  CHANNEL
+  THREAD
+}
+
+model ChatParticipant {
+  id         String   @id @default(cuid())
+  chatId     String
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       String   @default("member")
+  joinedAt   DateTime @default(now())
+  lastReadAt DateTime @default(now())
+
+  @@unique([chatId, userId])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  chatId         String
+  chat           Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content        String?
+  type           MessageType @default(TEXT)
+  mediaUrl       String?
+  fileUrl        String?
+  replyToId      String?
+  replyTo        Message?  @relation("MessageReply", fields: [replyToId], references: [id])
+  isEdited       Boolean  @default(false)
+  isDeleted      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  reactions    Reaction[]
+  readReceipts ReadReceipt[]
+  translations MessageTranslation[]
+  attachments  MessageAttachment[]
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+  VOICE_NOTE
+  GIF
+  STICKER
+}
+
+model Reaction {
+  id         String   @id @default(cuid())
+  messageId  String
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji      String
+  createdAt  DateTime @default(now())
+
+  @@unique([messageId, userId])
+}
+
+model ReadReceipt {
+  id         String   @id @default(cuid())
+  messageId  String
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt     DateTime @default(now())
+
+  @@unique([messageId, userId])
+}
+
+model MessageTranslation {
+  id         String   @id @default(cuid())
+  messageId  String
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  language   String
+  translatedContent String
+  createdAt  DateTime @default(now())
+}
+
+model MessageAttachment {
+  id         String   @id @default(cuid())
+  messageId  String
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  url        String
+  type       String
+  filename   String
+  size       Int
+  createdAt  DateTime @default(now())
+}

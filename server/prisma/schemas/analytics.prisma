@@ -1,0 +1,50 @@
+model UserAnalytics {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalStudyTime Int   @default(0) // minutes
+  speakingHours Float @default(0)
+  weakAreas   String[] // JSON or array
+  languageLevels String? // JSON mapping language->level
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model DailyMetric {
+  id          String   @id @default(cuid())
+  date        DateTime @unique
+  activeUsers Int      @default(0)
+  newUsers    Int      @default(0)
+  totalSessions Int   @default(0)
+  totalMessages Int   @default(0)
+  totalVoiceMinutes Int @default(0)
+  totalRevenue Float  @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WeeklyReport {
+  id          String   @id @default(cuid())
+  weekStart   DateTime @unique
+  activeUsers Int      @default(0)
+  newUsers    Int      @default(0)
+  retentionRate Float  @default(0)
+  avgSessionLength Float @default(0)
+  topLanguages String[]
+  revenue     Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model LearningAnalytics {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  language    String
+  skill       String
+  score       Float
+  timeSpent   Int      // minutes
+  exercisesCompleted Int @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

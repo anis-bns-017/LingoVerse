@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "main": "./src/index.ts",
   "dependencies": {
+    "@tanstack/react-query": "^5.101.4",
     "react": "^19.0.0-beta",
     "react-dom": "^19.0.0-beta"
   },

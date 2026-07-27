@@ -1,0 +1,176 @@
+model Course {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  category     String?
+  level        String   // beginner, intermediate, advanced
+  price        Float?
+  currency     String   @default("USD")
+  isFree       Boolean  @default(false)
+  thumbnailUrl String?
+  teacherId    String
+  teacher      User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  published    Boolean  @default(false)
+
+  lessons      Lesson[]
+  enrollments  Enrollment[]
+  reviews      CourseReview[]
+}
+
+model Lesson {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title      String
+  description String?
+  videoUrl   String?
+  duration   Int?     // seconds
+  order      Int
+  isFree     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  progress   LessonProgress[]
+}
+
+model LessonProgress {
+  id         String   @id @default(cuid())
+  lessonId   String
+  lesson     Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  watchedAt  DateTime?
+  completed  Boolean  @default(false)
+  progress   Int      @default(0) // percentage
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([lessonId, userId])
+}
+
+model Quiz {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title      String
+  description String?
+  timeLimit  Int?     // minutes
+  passingScore Int    @default(70)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  questions  Question[]
+  attempts   QuizAttempt[]
+}
+
+model Question {
+  id         String   @id @default(cuid())
+  quizId     String
+  quiz       Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  text       String
+  type       QuestionType @default(MULTIPLE_CHOICE)
+  options    String[]
+  correctAnswer String?  // for single choice, or JSON for multiple
+  points     Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SINGLE_CHOICE
+  TRUE_FALSE
+  FILL_BLANK
+  ESSAY
+}
+
+model QuizAttempt {
+  id         String   @id @default(cuid())
+  quizId     String
+  quiz       Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score      Int?
+  passed     Boolean?
+  startedAt  DateTime @default(now())
+  completedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Assignment {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title      String
+  description String?
+  dueDate    DateTime
+  maxPoints  Int      @default(100)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  submissions AssignmentSubmission[]
+}
+
+model AssignmentSubmission {
+  id         String   @id @default(cuid())
+  assignmentId String
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content    String?
+  fileUrl    String?
+  submittedAt DateTime @default(now())
+  grade      Float?
+  feedback   String?
+  gradedAt   DateTime?
+  status     AssignmentStatus @default(SUBMITTED)
+}
+
+enum AssignmentStatus {
+  SUBMITTED
+  GRADED
+  RETURNED
+}
+
+model Certificate {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  issuedAt   DateTime @default(now())
+  certificateUrl String
+  code       String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Enrollment {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enrolledAt DateTime @default(now())
+  completedAt DateTime?
+  progress   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([courseId, userId])
+}
+
+model CourseReview {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating     Int      // 1-5
+  comment    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

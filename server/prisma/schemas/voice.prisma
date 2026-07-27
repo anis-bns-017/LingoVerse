@@ -1,0 +1,77 @@
+model VoiceRoom {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  type          VoiceRoomType @default(OPEN)
+  status        RoomStatus @default(WAITING)
+  creatorId     String
+  creator       User     @relation("RoomCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  scheduledFor  DateTime?
+  startedAt     DateTime?
+  endedAt       DateTime?
+  maxParticipants Int    @default(50)
+  isRecording   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  participants VoiceParticipant[]
+  recordings   Recording[]
+  stages       Stage[]
+}
+
+enum VoiceRoomType {
+  OPEN
+  PRIVATE
+  SCHEDULED
+  STAGE
+}
+
+enum RoomStatus {
+  WAITING
+  ACTIVE
+  ENDED
+}
+
+model VoiceParticipant {
+  id         String   @id @default(cuid())
+  roomId     String
+  room       VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       ParticipantRole @default(LISTENER)
+  isMuted    Boolean  @default(false)
+  isDeafened Boolean  @default(false)
+  raisedHand Boolean  @default(false)
+  joinedAt   DateTime @default(now())
+  leftAt     DateTime?
+
+  @@unique([roomId, userId])
+}
+
+enum ParticipantRole {
+  SPEAKER
+  LISTENER
+  STAGE_SPEAKER
+  MODERATOR
+}
+
+model Stage {
+  id         String   @id @default(cuid())
+  roomId     String
+  room       VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  name       String
+  speakers   String[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Recording {
+  id         String   @id @default(cuid())
+  roomId     String
+  room       VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  url        String
+  duration   Int
+  size       Int
+  transcript String?
+  createdAt  DateTime @default(now())
+}

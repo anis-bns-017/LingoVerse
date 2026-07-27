@@ -1,0 +1,75 @@
+model AiChat {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String?
+  messages    AiMessage[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AiMessage {
+  id          String   @id @default(cuid())
+  chatId      String
+  chat        AiChat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role        String   // user, assistant
+  content     String
+  createdAt   DateTime @default(now())
+}
+
+model AiSession {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String   // speaking, pronunciation, essay, etc.
+  language    String
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AiFeedback {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId   String?  // reference to AiSession
+  feedback    String
+  rating      Int?     // 1-5
+  createdAt   DateTime @default(now())
+}
+
+model Recommendation {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemType    String   // course, teacher, lesson, vocabulary
+  itemId      String
+  score       Float
+  reason      String?
+  seen        Boolean  @default(false)
+  clicked     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StudyPlan {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  language    String
+  dailyGoal   Int      // minutes
+  schedule    String   // JSON array of days/tasks
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Analysis {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String   // pronunciation, grammar, vocabulary, fluency
+  score       Float
+  details     String?  // JSON
+  createdAt   DateTime @default(now())
+}

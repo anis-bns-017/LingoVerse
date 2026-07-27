@@ -1,0 +1,66 @@
+model Report {
+  id          String   @id @default(cuid())
+  reporterId  String
+  reporter    User     @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType  String   // user, message, community, course
+  targetId    String
+  reason      String
+  description String?
+  status      ReportStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  moderationLogs ModerationLog[]
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWING
+  RESOLVED
+  REJECTED
+}
+
+model FlaggedContent {
+  id          String   @id @default(cuid())
+  contentId   String
+  contentType String   // message, post, comment, etc.
+  reason      String
+  flaggedBy   String?  // user id, or "AI"
+  status      FlagStatus @default(FLAGGED)
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+  resolvedBy  String?
+}
+
+enum FlagStatus {
+  FLAGGED
+  REVIEWED
+  APPROVED
+  REMOVED
+}
+
+model ModerationLog {
+  id          String   @id @default(cuid())
+  adminId     String
+  admin       User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  action      String   // ban, mute, delete, warn
+  targetType  String
+  targetId    String
+  reason      String?
+  metadata    String?  // JSON
+  reportId    String?
+  report      Report?  @relation(fields: [reportId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}
+
+model ModerationRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String   // toxicity, spam, hate_speech
+  severity    String   // low, medium, high
+  action      String   // warn, mute, ban, delete
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
