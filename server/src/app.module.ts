@@ -8,6 +8,7 @@ import { SettingsModule } from './settings/settings.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PrismaService } from './prisma.service';
 import { LearningModule } from './learning/learning.module';
+import { FriendsModule } from './friends/friends.module';
 
 
 @Module({
@@ -18,6 +19,7 @@ import { LearningModule } from './learning/learning.module';
     ProfileModule,
     SettingsModule,
     LearningModule,
+    FriendsModule,
   ],
   providers: [PrismaService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

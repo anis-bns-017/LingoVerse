@@ -6,7 +6,7 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
 }
 
 // Base URL – allow override via environment variable
-const API_URL = import.meta?.env?.VITE_API_URL || process.env.VITE_API_URL || 'http://localhost:4000';
+const API_URL = import.meta?.env?.VITE_API_URL || process.env.VITE_API_URL || 'http://localhost:3000';
 
 // Create the Axios instance
 export const apiClient: AxiosInstance = axios.create({

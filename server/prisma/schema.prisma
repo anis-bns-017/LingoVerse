@@ -521,7 +521,6 @@ model User {
   notifications          Notification[]
   notificationPreference NotificationPreference?
   pushTokens             PushToken[]
-  streakId               String?
   chats                  Chat[]
   threadMessages         ThreadMessage[]
   courses                Course[]
