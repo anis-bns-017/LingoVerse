@@ -1,5 +1,6 @@
 import { IsOptional, IsBoolean, IsString, IsArray } from 'class-validator';
-
+import { Theme } from '@prisma/client';
+import { IsEnum } from 'class-validator';
 export class UpdateSettingsDto {
   @IsOptional()
   @IsBoolean()
@@ -14,17 +15,16 @@ export class UpdateSettingsDto {
   soundEffects?: boolean;
 
   @IsOptional()
-  @IsString()
-  theme?: 'light' | 'dark' | 'system';
+  @IsEnum(Theme)
+  theme?: Theme;
 
   @IsOptional()
   @IsString()
   language?: string;
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  dailyReminderTime?: string[];
+  @IsString()
+  dailyReminderTime?: string;
 
   @IsOptional()
   @IsBoolean()

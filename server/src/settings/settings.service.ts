@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { Theme } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 
@@ -10,10 +11,11 @@ export class SettingsService {
     const settings = await this.prisma.settings.findUnique({
       where: { userId },
     });
+
     if (!settings) {
-      // Create default settings if none exist
       return this.createDefaultSettings(userId);
     }
+
     return settings;
   }
 
@@ -24,7 +26,7 @@ export class SettingsService {
         emailNotifications: true,
         pushNotifications: true,
         soundEffects: true,
-        theme: 'system',
+        theme: Theme.SYSTEM,
         language: 'en',
         shareActivityWithFriends: true,
         showOnlineStatus: true,
@@ -36,13 +38,9 @@ export class SettingsService {
     const existing = await this.prisma.settings.findUnique({
       where: { userId },
     });
+
     if (!existing) {
-      // Create if doesn't exist
-      const defaults = await this.createDefaultSettings(userId);
-      return this.prisma.settings.update({
-        where: { userId },
-        data: dto,
-      });
+      await this.createDefaultSettings(userId);
     }
 
     return this.prisma.settings.update({

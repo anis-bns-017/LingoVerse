@@ -10,7 +10,8 @@ import {
 } from '@nestjs/common';
 import { LearningService } from './learning.service';
 //mport { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { JwtAuthGuard } from '../../server/src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
 import {
   GetVocabularyDto,
   CreateVocabularyDto,

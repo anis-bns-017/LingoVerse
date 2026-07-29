@@ -7,7 +7,8 @@ import { ProfileModule } from './profile/profile.module';
 import { SettingsModule } from './settings/settings.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PrismaService } from './prisma.service';
-import { LearningModule } from '../learning/learning.module';
+import { LearningModule } from './learning/learning.module';
+
 
 @Module({
   imports: [
