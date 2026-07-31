@@ -695,6 +695,8 @@ model Message {
   content      String?
   type         MessageType          @default(TEXT)
   replyToId    String?
+  mediaUrl  String?
+  fileUrl   String?
   replyTo      Message?             @relation("MessageReply", fields: [replyToId], references: [id])
   replies      Message[]            @relation("MessageReply")
   isEdited     Boolean              @default(false)

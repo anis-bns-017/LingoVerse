@@ -6,33 +6,32 @@ import {
   Delete,
   Body,
   Query,
+  Param,
   UseGuards,
   Request,
-  Param,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { FriendsService } from './friends.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   SendFriendRequestDto,
   RespondFriendRequestDto,
+  CancelFriendRequestDto,
   BlockUserDto,
-  GetFriendsDto,
 } from './dto/friend-request.dto';
+import { SearchUsersDto } from './dto/search-friends.dto';
 
 @Controller('friends')
 @UseGuards(JwtAuthGuard)
 export class FriendsController {
   constructor(private friendsService: FriendsService) {}
 
-  // ---------- REQUESTS ----------
+  // ============ FRIEND REQUESTS ============
+
   @Post('requests')
   async sendFriendRequest(@Request() req, @Body() dto: SendFriendRequestDto) {
     return this.friendsService.sendFriendRequest(req.user.id, dto);
-  }
-
-  @Get('requests')
-  async getFriendRequests(@Request() req) {
-    return this.friendsService.getFriendRequests(req.user.id);
   }
 
   @Put('requests/respond')
@@ -40,23 +39,35 @@ export class FriendsController {
     return this.friendsService.respondFriendRequest(req.user.id, dto);
   }
 
-  // ---------- FRIENDS ----------
+  @Delete('requests/:requestId')
+  async cancelFriendRequest(@Request() req, @Param('requestId') requestId: string) {
+    return this.friendsService.cancelFriendRequest(req.user.id, requestId);
+  }
+
+  @Get('requests/incoming')
+  async getIncomingRequests(@Request() req) {
+    return this.friendsService.getFriendRequests(req.user.id);
+  }
+
+  @Get('requests/outgoing')
+  async getOutgoingRequests(@Request() req) {
+    return this.friendsService.getSentFriendRequests(req.user.id);
+  }
+
+  // ============ FRIENDS ============
+
   @Get()
-  async getFriends(@Request() req, @Query() query: GetFriendsDto) {
-    return this.friendsService.getFriends(
-      req.user.id,
-      query.search,
-      query.limit ? parseInt(query.limit) : undefined,
-      query.offset ? parseInt(query.offset) : undefined
-    );
+  async getFriends(@Request() req) {
+    return this.friendsService.getFriends(req.user.id);
   }
 
-  @Get('suggestions')
-  async getSuggestions(@Request() req) {
-    return this.friendsService.getSuggestions(req.user.id);
+  @Get('count')
+  async getFriendCount(@Request() req) {
+    return this.friendsService.getFriendCount(req.user.id);
   }
 
-  // ---------- BLOCKING ----------
+  // ============ BLOCKING ============
+
   @Post('block')
   async blockUser(@Request() req, @Body() dto: BlockUserDto) {
     return this.friendsService.blockUser(req.user.id, dto);
@@ -70,5 +81,33 @@ export class FriendsController {
   @Get('blocked')
   async getBlockedUsers(@Request() req) {
     return this.friendsService.getBlockedUsers(req.user.id);
+  }
+
+  // ============ SEARCH ============
+
+  @Get('search')
+  async searchUsers(@Request() req, @Query() query: SearchUsersDto) {
+    const limit = query.limit ? parseInt(query.limit) : 20;
+    return this.friendsService.searchUsers(req.user.id, query.query, limit);
+  }
+
+  // ============ ONLINE STATUS ============
+
+  @Get('online/:userId')
+  async getOnlineStatus(@Param('userId') userId: string) {
+    return this.friendsService.getOnlineStatus(userId);
+  }
+
+  @Post('online/update')
+  @HttpCode(HttpStatus.OK)
+  async updateLastActive(@Request() req) {
+    return this.friendsService.updateLastActive(req.user.id);
+  }
+
+  // ============ UTILITY ============
+
+  @Get('check/:userId')
+  async checkFriendship(@Request() req, @Param('userId') userId: string) {
+    return this.friendsService.checkFriendship(req.user.id, userId);
   }
 }

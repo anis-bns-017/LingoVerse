@@ -143,7 +143,7 @@ const users = await prisma.$queryRawUnsafe(
 ```typescript
 // Array operations
 const users = await prisma.$queryRaw`
-  SELECT * FROM "User" WHERE 'admin' = ANY(roles)
+  SELECT * FROM "User" WHERE 'ADMIN' = ANY(roles)
 `
 
 // JSON operations

@@ -14,6 +14,7 @@ import { ProgressPage } from "../pages/ProgressPage";
 import { FriendsPage } from "../pages/FriendsPage";
 import { SuggestionsPage } from "../pages/SuggestionsPage";
 import { BlockedPage } from "../pages/BlockedPage";
+import { ChatPage } from "../pages/ChatPage";
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -116,6 +117,15 @@ export const AppRoutes = () => {
           element={
             <ProtectedRoute>
               <BlockedPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute>
+              <ChatPage />
             </ProtectedRoute>
           }
         />

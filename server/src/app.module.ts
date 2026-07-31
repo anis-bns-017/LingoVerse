@@ -7,9 +7,9 @@ import { ProfileModule } from './profile/profile.module';
 import { SettingsModule } from './settings/settings.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PrismaService } from './prisma.service';
+import { ChatModule } from './chat/chat.module';
 import { LearningModule } from './learning/learning.module';
 import { FriendsModule } from './friends/friends.module';
-
 
 @Module({
   imports: [
@@ -20,6 +20,7 @@ import { FriendsModule } from './friends/friends.module';
     SettingsModule,
     LearningModule,
     FriendsModule,
+    ChatModule,
   ],
   providers: [PrismaService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

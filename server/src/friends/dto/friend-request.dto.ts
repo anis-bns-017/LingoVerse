@@ -1,16 +1,27 @@
-import { IsString, IsOptional } from 'class-validator';
+// friend-request.dto.ts
+import { IsString, IsOptional, IsEnum } from 'class-validator';
+
+export enum FriendRequestAction {
+  ACCEPTED = 'accepted',
+  REJECTED = 'rejected',
+}
 
 export class SendFriendRequestDto {
   @IsString()
-  userId: string;
+  toUserId: string;
 }
 
 export class RespondFriendRequestDto {
   @IsString()
   requestId: string;
 
+  @IsEnum(FriendRequestAction)
+  action: FriendRequestAction;
+}
+
+export class CancelFriendRequestDto {
   @IsString()
-  action: 'accept' | 'reject';
+  requestId: string;
 }
 
 export class BlockUserDto {
@@ -22,7 +33,13 @@ export class BlockUserDto {
   reason?: string;
 }
 
-export class GetFriendsDto {
+export class UnblockUserDto {
+  @IsString()
+  targetUserId: string;
+}
+
+// For GET /friends?search=&limit=&offset=
+export class GetFriendsQueryDto {
   @IsOptional()
   @IsString()
   search?: string;

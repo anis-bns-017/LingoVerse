@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Clock,
   ArrowRight,
+  MessageCircle,
 } from "lucide-react";
 
 export const DashboardPage = () => {
@@ -52,6 +53,11 @@ export const DashboardPage = () => {
                   <BookOpen className="w-4 h-4 text-slate-400" />
                   Vocabulary
                 </Link>
+
+                <Link to="/chat" className="text-blue-600 hover:underline">
+                  Chat
+                </Link>
+
                 <Link
                   to="/flashcards"
                   className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-50 transition-colors"
@@ -79,6 +85,14 @@ export const DashboardPage = () => {
                 >
                   <TrendingUp className="w-4 h-4 text-slate-400" />
                   Progress
+                </Link>
+
+                <Link
+                  to="/chat"
+                  className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                  <span>Chat</span>
                 </Link>
 
                 {/* Social Dropdown Menu */}
@@ -188,7 +202,8 @@ export const DashboardPage = () => {
               Welcome back, {user?.name || "Learner"}!
             </h2>
             <p className="text-indigo-100 text-sm leading-relaxed mb-6">
-              You're making great progress! You've completed 80% of your weekly goal. Keep the momentum going today.
+              You're making great progress! You've completed 80% of your weekly
+              goal. Keep the momentum going today.
             </p>
             <button
               onClick={() => navigate("/exercises")}
@@ -210,7 +225,9 @@ export const DashboardPage = () => {
               <Flame className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Streak</p>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                Streak
+              </p>
               <p className="text-xl font-bold text-slate-800">12 Days</p>
             </div>
           </div>
@@ -220,7 +237,9 @@ export const DashboardPage = () => {
               <BookOpen className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Words Learned</p>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                Words Learned
+              </p>
               <p className="text-xl font-bold text-slate-800">342 Words</p>
             </div>
           </div>
@@ -230,7 +249,9 @@ export const DashboardPage = () => {
               <Clock className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Time Spent</p>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                Time Spent
+              </p>
               <p className="text-xl font-bold text-slate-800">14.5 Hours</p>
             </div>
           </div>
@@ -240,7 +261,9 @@ export const DashboardPage = () => {
               <Award className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Total XP</p>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+                Total XP
+              </p>
               <p className="text-xl font-bold text-slate-800">2,450 XP</p>
             </div>
           </div>
@@ -250,7 +273,9 @@ export const DashboardPage = () => {
         <section>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-slate-800">Learning Hub</h3>
-            <span className="text-xs text-slate-500">Choose a activity to start practice</span>
+            <span className="text-xs text-slate-500">
+              Choose a activity to start practice
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -264,7 +289,9 @@ export const DashboardPage = () => {
               <h4 className="font-semibold text-slate-800 mb-1 group-hover:text-indigo-600 transition-colors">
                 Vocabulary
               </h4>
-              <p className="text-xs text-slate-500">Expand your word bank with spaced repetition.</p>
+              <p className="text-xs text-slate-500">
+                Expand your word bank with spaced repetition.
+              </p>
             </Link>
 
             <Link
@@ -277,7 +304,9 @@ export const DashboardPage = () => {
               <h4 className="font-semibold text-slate-800 mb-1 group-hover:text-violet-600 transition-colors">
                 Flashcards
               </h4>
-              <p className="text-xs text-slate-500">Master difficult terms using interactive cards.</p>
+              <p className="text-xs text-slate-500">
+                Master difficult terms using interactive cards.
+              </p>
             </Link>
 
             <Link
@@ -290,7 +319,9 @@ export const DashboardPage = () => {
               <h4 className="font-semibold text-slate-800 mb-1 group-hover:text-sky-600 transition-colors">
                 Grammar Rules
               </h4>
-              <p className="text-xs text-slate-500">Understand tense usage, syntax, and structures.</p>
+              <p className="text-xs text-slate-500">
+                Understand tense usage, syntax, and structures.
+              </p>
             </Link>
 
             <Link
@@ -303,7 +334,9 @@ export const DashboardPage = () => {
               <h4 className="font-semibold text-slate-800 mb-1 group-hover:text-emerald-600 transition-colors">
                 Interactive Exercises
               </h4>
-              <p className="text-xs text-slate-500">Test your skills with quizzes and listening drills.</p>
+              <p className="text-xs text-slate-500">
+                Test your skills with quizzes and listening drills.
+              </p>
             </Link>
           </div>
         </section>

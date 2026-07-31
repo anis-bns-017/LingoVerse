@@ -1,85 +1,73 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/api/client';
+import { toast } from 'sonner';
 
+// ---------- Types ----------
 export interface Friend {
   id: string;
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    avatarUrl?: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  friendSince: string;
+  profile?: {
+    nativeLanguage?: string;
+    learningLanguages?: string[];
+    lastActive?: string;
   };
-  createdAt: string;
 }
 
 export interface FriendRequest {
   id: string;
+  fromUserId: string;
+  toUserId: string;
+  status: string;
+  createdAt: string;
   fromUser: {
     id: string;
     name: string;
     email: string;
     avatarUrl?: string;
   };
-  createdAt: string;
 }
 
 export interface BlockedUser {
   id: string;
-  blocked: {
-    id: string;
-    name: string;
-    email: string;
-    avatarUrl?: string;
-  };
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  blockedAt: string;
   reason?: string;
-  createdAt: string;
 }
 
-export interface Suggestion {
+export interface UserSearchResult {
   id: string;
   name: string;
   email: string;
   avatarUrl?: string;
+  isFriend: boolean;
+  isRequested: boolean;
+  isBlocked: boolean;
   profile?: {
     nativeLanguage?: string;
     learningLanguages?: string[];
-    interests?: string[];
   };
 }
 
-// ---------- FRIENDS ----------
-export const useFriends = (search?: string) => {
-  return useQuery({
-    queryKey: ['friends', search],
-    queryFn: async () => {
-      const response = await apiClient.get<{ items: Friend[]; total: number }>('/friends', {
-        params: { search },
-      });
-      return response.data;
-    },
-  });
-};
-
-export const useFriendRequests = () => {
-  return useQuery({
-    queryKey: ['friendRequests'],
-    queryFn: async () => {
-      const response = await apiClient.get<FriendRequest[]>('/friends/requests');
-      return response.data;
-    },
-  });
-};
-
+// ---------- Friend Requests ----------
 export const useSendFriendRequest = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (userId: string) => {
-      const response = await apiClient.post('/friends/requests', { userId });
+    mutationFn: async (toUserId: string) => {
+      const response = await apiClient.post('/friends/requests', { toUserId });
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['friendRequests'] });
-      queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+      toast.success('Friend request sent!');
+      queryClient.invalidateQueries({ queryKey: ['friends'] });
+      queryClient.invalidateQueries({ queryKey: ['friend-requests'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to send request');
     },
   });
 };
@@ -87,50 +75,94 @@ export const useSendFriendRequest = () => {
 export const useRespondFriendRequest = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { requestId: string; action: 'accept' | 'reject' }) => {
-      const response = await apiClient.put('/friends/requests/respond', data);
+    mutationFn: async ({ requestId, action }: { requestId: string; action: 'accepted' | 'rejected' }) => {
+      const response = await apiClient.put('/friends/requests/respond', { requestId, action });
+      return response.data;
+    },
+    onSuccess: (_, variables) => {
+      toast.success(variables.action === 'accepted' ? 'Friend request accepted!' : 'Friend request rejected');
+      queryClient.invalidateQueries({ queryKey: ['friends'] });
+      queryClient.invalidateQueries({ queryKey: ['friend-requests'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to respond');
+    },
+  });
+};
+
+export const useCancelFriendRequest = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (requestId: string) => {
+      const response = await apiClient.delete(`/friends/requests/${requestId}`);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['friendRequests'] });
-      queryClient.invalidateQueries({ queryKey: ['friends'] });
-      queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+      toast.success('Friend request cancelled');
+      queryClient.invalidateQueries({ queryKey: ['friend-requests'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to cancel');
     },
   });
 };
 
-export const useSuggestions = () => {
+// ---------- Friends List ----------
+export const useFriends = () => {
   return useQuery({
-    queryKey: ['suggestions'],
+    queryKey: ['friends'],
     queryFn: async () => {
-      const response = await apiClient.get<Suggestion[]>('/friends/suggestions');
+      const response = await apiClient.get<Friend[]>('/friends');
       return response.data;
     },
   });
 };
 
-// ---------- BLOCKING ----------
-export const useBlockedUsers = () => {
+export const useFriendRequests = () => {
   return useQuery({
-    queryKey: ['blocked'],
+    queryKey: ['friend-requests'],
     queryFn: async () => {
-      const response = await apiClient.get<BlockedUser[]>('/friends/blocked');
+      const response = await apiClient.get<FriendRequest[]>('/friends/requests/incoming');
       return response.data;
     },
   });
 };
 
+export const useOutgoingRequests = () => {
+  return useQuery({
+    queryKey: ['outgoing-requests'],
+    queryFn: async () => {
+      const response = await apiClient.get<FriendRequest[]>('/friends/requests/outgoing');
+      return response.data;
+    },
+  });
+};
+
+export const useFriendCount = () => {
+  return useQuery({
+    queryKey: ['friend-count'],
+    queryFn: async () => {
+      const response = await apiClient.get<number>('/friends/count');
+      return response.data;
+    },
+  });
+};
+
+// ---------- Blocking ----------
 export const useBlockUser = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { userId: string; reason?: string }) => {
-      const response = await apiClient.post('/friends/block', data);
+    mutationFn: async ({ userId, reason }: { userId: string; reason?: string }) => {
+      const response = await apiClient.post('/friends/block', { userId, reason });
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['blocked'] });
+      toast.success('User blocked');
       queryClient.invalidateQueries({ queryKey: ['friends'] });
-      queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['blocked-users'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to block user');
     },
   });
 };
@@ -143,9 +175,86 @@ export const useUnblockUser = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['blocked'] });
-      queryClient.invalidateQueries({ queryKey: ['friends'] });
-      queryClient.invalidateQueries({ queryKey: ['suggestions'] });
+      toast.success('User unblocked');
+      queryClient.invalidateQueries({ queryKey: ['blocked-users'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to unblock user');
+    },
+  });
+};
+
+export const useBlockedUsers = () => {
+  return useQuery({
+    queryKey: ['blocked-users'],
+    queryFn: async () => {
+      const response = await apiClient.get<BlockedUser[]>('/friends/blocked');
+      return response.data;
+    },
+  });
+};
+
+// ---------- Search ----------
+export const useSearchUsers = (query: string) => {
+  return useQuery({
+    queryKey: ['user-search', query],
+    queryFn: async () => {
+      if (!query || query.length < 2) return [];
+      const response = await apiClient.get<UserSearchResult[]>('/friends/search', {
+        params: { query },
+      });
+      return response.data;
+    },
+    enabled: query.length >= 2,
+  });
+};
+
+// ---------- Online Status ----------
+export const useOnlineStatus = (userId: string) => {
+  return useQuery({
+    queryKey: ['online-status', userId],
+    queryFn: async () => {
+      const response = await apiClient.get<{ online: boolean; lastActive: string }>(
+        `/friends/online/${userId}`
+      );
+      return response.data;
+    },
+    refetchInterval: 30000, // refresh every 30 seconds
+  });
+};
+
+export const useUpdateLastActive = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post('/friends/online/update');
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['online-status'] });
+    },
+  });
+};
+
+// ---------- Friendship Check ----------
+export const useCheckFriendship = (userId: string) => {
+  return useQuery({
+    queryKey: ['friendship-check', userId],
+    queryFn: async () => {
+      const response = await apiClient.get<boolean>(`/friends/check/${userId}`);
+      return response.data;
+    },
+    enabled: !!userId,
+  });
+};
+
+
+export const useSuggestions = () => {
+  return useQuery({
+    queryKey: ['friend-suggestions'],
+    queryFn: async () => {
+      const response = await apiClient.get('/friends/suggestions');
+      return response.data; // Assuming it returns UserSearchResult[] or similar
     },
   });
 };
