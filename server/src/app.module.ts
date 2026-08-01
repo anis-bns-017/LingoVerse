@@ -7,6 +7,7 @@ import { ProfileModule } from './profile/profile.module';
 import { SettingsModule } from './settings/settings.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PrismaService } from './prisma.service';
+import { VoiceModule } from './voice/voice.module';
 import { ChatModule } from './chat/chat.module';
 import { LearningModule } from './learning/learning.module';
 import { FriendsModule } from './friends/friends.module';
@@ -21,6 +22,7 @@ import { FriendsModule } from './friends/friends.module';
     LearningModule,
     FriendsModule,
     ChatModule,
+    VoiceModule,
   ],
   providers: [PrismaService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

@@ -430,11 +430,21 @@ enum RoomStatus {
   CANCELLED
 }
 
-enum VoiceParticipantRole {
-  HOST
-  MODERATOR
+enum ParticipantRole {
   SPEAKER
   LISTENER
+  STAGE_SPEAKER
+  MODERATOR
+}
+
+model Stage {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  name      String
+  speakers  String[] // user IDs on stage
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 // ============================
@@ -467,7 +477,8 @@ model User {
   reactions              Reaction[]
   readReceipts           ReadReceipt[]
   messageTranslations    MessageTranslation[]
-  voiceRooms             VoiceRoom[]
+  // ---- FIX: removed voiceRooms and added createdRooms with relation ----
+  createdRooms           VoiceRoom[]             @relation("RoomCreator")
   voiceParticipants      VoiceParticipant[]
   recordings             Recording[]
   ownedCommunities       Community[]             @relation("CommunityCreator")
@@ -695,8 +706,8 @@ model Message {
   content      String?
   type         MessageType          @default(TEXT)
   replyToId    String?
-  mediaUrl  String?
-  fileUrl   String?
+  mediaUrl     String?
+  fileUrl      String?
   replyTo      Message?             @relation("MessageReply", fields: [replyToId], references: [id])
   replies      Message[]            @relation("MessageReply")
   isEdited     Boolean              @default(false)
@@ -865,7 +876,7 @@ model CommunityRole {
   position    Int
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
+
   @@index([communityId])
   @@index([userId])
 }
@@ -1100,16 +1111,16 @@ model Vocabulary {
 }
 
 model Flashcard {
-  id        String            @id @default(cuid())
-  front     String
-  back      String
-  language  String
+  id          String            @id @default(cuid())
+  front       String
+  back        String
+  language    String
   languageRef Language          @relation(fields: [language], references: [code], onDelete: Cascade)
-  userId    String
-  user      User              @relation("FlashcardCreator", fields: [userId], references: [id], onDelete: Cascade)
-  reviews   FlashcardReview[]
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  userId      String
+  user        User              @relation("FlashcardCreator", fields: [userId], references: [id], onDelete: Cascade)
+  reviews     FlashcardReview[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@index([userId])
   @@index([language])
@@ -1170,31 +1181,31 @@ model GrammarRule {
 }
 
 model Language {
-  code             String         @id
-  name             String
-  nativeLanguage   String?
-  vocabularies     Vocabulary[]
-  flashcards       Flashcard[]
-  grammarRules     GrammarRule[]
-  exercises        Exercise[]
-  analysisReports  Analysis[]
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  code            String        @id
+  name            String
+  nativeLanguage  String?
+  vocabularies    Vocabulary[]
+  flashcards      Flashcard[]
+  grammarRules    GrammarRule[]
+  exercises       Exercise[]
+  analysisReports Analysis[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 model Exercise {
-  id           String       @id @default(cuid())
-  type         ExerciseType
-  language     String
-  languageRef  Language     @relation(fields: [language], references: [code], onDelete: Cascade)
-  title        String
-  description  String?
-  content      String
+  id              String          @id @default(cuid())
+  type            ExerciseType
+  language        String
+  languageRef     Language        @relation(fields: [language], references: [code], onDelete: Cascade)
+  title           String
+  description     String?
+  content         String
   difficultyLevel DifficultyLevel @default(BEGINNER)
-  userId       String
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   @@index([language])
   @@index([userId])
@@ -1241,30 +1252,30 @@ model AiSession {
 }
 
 model AiFeedback {
-  id             String      @id @default(cuid())
-  userId         String
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sessionId      String?
-  analysisType   AnalysisType
-  feedback       String
-  suggestions    String[]
-  score          Float?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId    String?
+  analysisType AnalysisType
+  feedback     String
+  suggestions  String[]
+  score        Float?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@index([userId])
 }
 
 model Recommendation {
-  id              String             @id @default(cuid())
-  userId          String
-  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type            RecommendationType
-  targetId        String
-  reason          String?
-  confidence      Float              @default(0.5)
-  acknowledged    Boolean            @default(false)
-  createdAt       DateTime           @default(now())
+  id           String             @id @default(cuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         RecommendationType
+  targetId     String
+  reason       String?
+  confidence   Float              @default(0.5)
+  acknowledged Boolean            @default(false)
+  createdAt    DateTime           @default(now())
 
   @@index([userId])
   @@index([type])
@@ -1288,14 +1299,14 @@ model Analysis {
 
 // ----- Gamification -----
 model Streak {
-  id               String    @id @default(cuid())
-  userId           String    @unique
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  currentStreak    Int       @default(0)
-  longestStreak    Int       @default(0)
-  lastActivityDate DateTime  @default(now())
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentStreak    Int      @default(0)
+  longestStreak    Int      @default(0)
+  lastActivityDate DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model Progress {
@@ -1313,36 +1324,36 @@ model Progress {
 }
 
 model XpTransaction {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount    Int
   reason    XpReason
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId])
 }
 
 model UserBadge {
-  id        String      @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  badge     Badge       @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
   badgeId   String
-  earnedAt  DateTime    @default(now())
-  createdAt DateTime    @default(now())
+  earnedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([userId, badgeId])
   @@index([userId])
 }
 
 model Badge {
-  id       String         @id @default(cuid())
-  name     String
-  category BadgeCategory
-  type     BadgeType
-  icon     String?
-  users    UserBadge[]
+  id        String        @id @default(cuid())
+  name      String
+  category  BadgeCategory
+  type      BadgeType
+  icon      String?
+  users     UserBadge[]
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
@@ -1350,16 +1361,16 @@ model Badge {
 }
 
 model Challenge {
-  id               String             @id @default(cuid())
-  title            String
-  description      String?
-  type             ChallengeType
-  target           Int
-  reward           Int
-  icon             String?
-  progress         ChallengeProgress[]
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id          String              @id @default(cuid())
+  title       String
+  description String?
+  type        ChallengeType
+  target      Int
+  reward      Int
+  icon        String?
+  progress    ChallengeProgress[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 }
 
 model ChallengeProgress {
@@ -1395,20 +1406,20 @@ model Leaderboard {
 
 // ----- Teachers -----
 model Teacher {
-  id               String             @id @default(cuid())
-  userId           String             @unique
-  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bio              String?
-  specialties      String[]
-  experience       String?
-  hourlyRate       Float?
+  id                 String             @id @default(cuid())
+  userId             String             @unique
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio                String?
+  specialties        String[]
+  experience         String?
+  hourlyRate         Float?
   verificationStatus VerificationStatus @default(PENDING)
-  bookings         Booking[]
-  liveClasses      LiveClass[]
-  schedules        Schedule[]
-  reviews          Review[]
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  bookings           Booking[]
+  liveClasses        LiveClass[]
+  schedules          Schedule[]
+  reviews            Review[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 }
 
 model Booking {
@@ -1478,31 +1489,31 @@ model Review {
 }
 
 model Homework {
-  id                 String                 @id @default(cuid())
-  title              String
-  description        String?
-  assignedById       String
-  assignedBy         User                   @relation(fields: [assignedById], references: [id], onDelete: Cascade)
-  dueDate            DateTime
-  submissions        HomeworkSubmission[]
-  createdAt          DateTime               @default(now())
-  updatedAt          DateTime               @updatedAt
+  id           String               @id @default(cuid())
+  title        String
+  description  String?
+  assignedById String
+  assignedBy   User                 @relation(fields: [assignedById], references: [id], onDelete: Cascade)
+  dueDate      DateTime
+  submissions  HomeworkSubmission[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
   @@index([assignedById])
 }
 
 model HomeworkSubmission {
-  id         String           @id @default(cuid())
-  homeworkId String
-  homework   Homework         @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  content    String?
-  fileUrl    String?
-  status     SubmissionStatus @default(SUBMITTED)
+  id          String           @id @default(cuid())
+  homeworkId  String
+  homework    Homework         @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     String?
+  fileUrl     String?
+  status      SubmissionStatus @default(SUBMITTED)
   submittedAt DateTime         @default(now())
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   @@unique([homeworkId, userId])
   @@index([userId])
@@ -1510,47 +1521,52 @@ model HomeworkSubmission {
 
 // ----- Voice -----
 model VoiceRoom {
-  id              String               @id @default(cuid())
+  id              String        @id @default(cuid())
   name            String
   description     String?
-  hostId          String
-  host            User                 @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  type            VoiceRoomType        @default(OPEN)
-  status          RoomStatus           @default(WAITING)
-  maxParticipants Int                  @default(100)
-  participants    VoiceParticipant[]
-  recordings      Recording[]
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  type            VoiceRoomType @default(OPEN)
+  status          RoomStatus    @default(WAITING)
+  creatorId       String
+  creator         User          @relation("RoomCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  scheduledFor    DateTime?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  maxParticipants Int           @default(50)
+  isRecording     Boolean       @default(false)
+  liveKitRoomId   String? // LiveKit room name
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  @@index([hostId])
+  participants VoiceParticipant[]
+  recordings   Recording[]
+  stages       Stage[]
 }
 
 model VoiceParticipant {
-  id        String            @id @default(cuid())
-  roomId    String
-  room      VoiceRoom         @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      VoiceParticipantRole @default(LISTENER)
-  joinedAt  DateTime          @default(now())
-  leftAt    DateTime?
-  duration  Int?              // in seconds
+  id         String          @id @default(cuid())
+  roomId     String
+  room       VoiceRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       ParticipantRole @default(LISTENER)
+  isMuted    Boolean         @default(false)
+  isDeafened Boolean         @default(false)
+  raisedHand Boolean         @default(false)
+  joinedAt   DateTime        @default(now())
+  leftAt     DateTime?
 
   @@unique([roomId, userId])
-  @@index([roomId])
-  @@index([userId])
 }
 
 model Recording {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   roomId    String
   room      VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   url       String
-  duration  Int      // in seconds
-  createdAt DateTime @default(now())
+  duration  Int // in seconds
+  createdAt DateTime  @default(now())
 
   @@index([roomId])
   @@index([userId])
@@ -1558,21 +1574,21 @@ model Recording {
 
 // ----- Marketplace -----
 model Product {
-  id              String           @id @default(cuid())
-  name            String
-  description     String?
-  type            ProductType
-  price           Float
-  currency        String           @default("USD")
-  stock           Int?
-  thumbnailUrl    String?
-  creatorId       String
-  creator         User             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  orders          Order[]
-  wishlists       Wishlist[]
-  reviews         ProductReview[]
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id           String          @id @default(cuid())
+  name         String
+  description  String?
+  type         ProductType
+  price        Float
+  currency     String          @default("USD")
+  stock        Int?
+  thumbnailUrl String?
+  creatorId    String
+  creator      User            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  wishlists    Wishlist[]
+  reviews      ProductReview[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   @@index([creatorId])
   @@index([type])
@@ -1588,16 +1604,16 @@ model Cart {
 }
 
 model Order {
-  id          String      @id @default(cuid())
-  userId      String
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  quantity    Int
-  totalPrice  Float
-  status      OrderStatus @default(PENDING)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity   Int
+  totalPrice Float
+  status     OrderStatus @default(PENDING)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
   @@index([userId])
   @@index([productId])
@@ -1649,16 +1665,16 @@ model Payment {
 }
 
 model Subscription {
-  id         String             @id @default(cuid())
-  userId     String
-  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan       SubscriptionPlan   @default(FREE)
-  status     SubscriptionStatus @default(ACTIVE)
-  startDate  DateTime           @default(now())
-  endDate    DateTime?
+  id          String             @id @default(cuid())
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan        SubscriptionPlan   @default(FREE)
+  status      SubscriptionStatus @default(ACTIVE)
+  startDate   DateTime           @default(now())
+  endDate     DateTime?
   renewalDate DateTime?
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
 
   @@unique([userId])
   @@index([userId])
@@ -1666,28 +1682,28 @@ model Subscription {
 }
 
 model Invoice {
-  id            String        @id @default(cuid())
-  userId        String
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptionId String?
-  amount        Float
-  status        InvoiceStatus @default(UNPAID)
-  dueDate       DateTime
-  paidAt        DateTime?
-  createdAt     DateTime      @default(now())
+  amount         Float
+  status         InvoiceStatus @default(UNPAID)
+  dueDate        DateTime
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
 
   @@index([userId])
   @@index([status])
 }
 
 model Payout {
-  id        String        @id @default(cuid())
+  id        String       @id @default(cuid())
   userId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount    Float
-  status    PayoutStatus  @default(PENDING)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  status    PayoutStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   @@index([userId])
   @@index([status])
@@ -1695,18 +1711,18 @@ model Payout {
 
 // ----- Moderation -----
 model Report {
-  id            String         @id @default(cuid())
-  reportedById  String
-  reportedBy    User           @relation(fields: [reportedById], references: [id], onDelete: Cascade)
-  targetId      String
-  targetType    ReportTargetType
-  reason        String
-  description   String?
-  status        ReportStatus   @default(PENDING)
-  reviewedById  String?
-  resolution    String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id           String           @id @default(cuid())
+  reportedById String
+  reportedBy   User             @relation(fields: [reportedById], references: [id], onDelete: Cascade)
+  targetId     String
+  targetType   ReportTargetType
+  reason       String
+  description  String?
+  status       ReportStatus     @default(PENDING)
+  reviewedById String?
+  resolution   String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
   @@index([reportedById])
   @@index([status])
@@ -1714,24 +1730,24 @@ model Report {
 }
 
 model ModerationLog {
-  id             String          @id @default(cuid())
-  moderatorId    String
-  moderator      User            @relation(fields: [moderatorId], references: [id], onDelete: Cascade)
-  targetId       String
-  action         ModerationAction
-  reason         String?
-  createdAt      DateTime        @default(now())
+  id          String           @id @default(cuid())
+  moderatorId String
+  moderator   User             @relation(fields: [moderatorId], references: [id], onDelete: Cascade)
+  targetId    String
+  action      ModerationAction
+  reason      String?
+  createdAt   DateTime         @default(now())
 
   @@index([moderatorId])
 }
 
 model ContentFlag {
-  id        String    @id @default(cuid())
+  id        String             @id @default(cuid())
   content   String
-  status    FlagStatus @default(FLAGGED)
+  status    FlagStatus         @default(FLAGGED)
   ruleType  ModerationRuleType
   severity  SeverityLevel
-  createdAt DateTime  @default(now())
+  createdAt DateTime           @default(now())
 
   @@index([status])
   @@index([severity])
@@ -1739,64 +1755,64 @@ model ContentFlag {
 
 // ----- Notifications -----
 model Notification {
-  id         String           @id @default(cuid())
-  userId     String
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type       NotificationType
-  title      String
-  message    String
-  actionUrl  String?
-  isRead     Boolean          @default(false)
-  createdAt  DateTime         @default(now())
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  actionUrl String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
 
   @@index([userId])
   @@index([isRead])
 }
 
 model NotificationPreference {
-  id                  String   @id @default(cuid())
-  userId              String   @unique
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  enableEmailNotifications Boolean @default(true)
-  enablePushNotifications  Boolean @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                       String   @id @default(cuid())
+  userId                   String   @unique
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enableEmailNotifications Boolean  @default(true)
+  enablePushNotifications  Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model PushToken {
-  id        String   @id @default(cuid())
+  id        String               @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String               @unique
   platform  NotificationPlatform
-  createdAt DateTime @default(now())
+  createdAt DateTime             @default(now())
 
   @@index([userId])
 }
 
 // ----- Analytics -----
 model UserAnalytics {
-  id                   String   @id @default(cuid())
-  userId               String   @unique
-  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  totalLessonsCompleted Int     @default(0)
-  totalXpEarned        Int      @default(0)
-  totalCoursesEnrolled Int      @default(0)
-  longestStreak        Int      @default(0)
-  lastActivityDate     DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                    String    @id @default(cuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalLessonsCompleted Int       @default(0)
+  totalXpEarned         Int       @default(0)
+  totalCoursesEnrolled  Int       @default(0)
+  longestStreak         Int       @default(0)
+  lastActivityDate      DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 }
 
 model LearningAnalytics {
-  id              String      @id @default(cuid())
-  userId          String
-  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  skillType       SkillType
-  proficiency     Float
-  lastAssessment  DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillType      SkillType
+  proficiency    Float
+  lastAssessment DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([userId, skillType])
   @@index([userId])
