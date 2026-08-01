@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@lingoverse/api';
+import { apiClient } from '../lib/api/client';
 import { toast } from 'sonner';
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';

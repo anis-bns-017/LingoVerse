@@ -54,8 +54,12 @@ export const DashboardPage = () => {
                   Vocabulary
                 </Link>
 
-                <Link to="/chat" className="text-blue-600 hover:underline">
-                  Chat
+                <Link
+                  to="/chat"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-50 transition-colors"
+                >
+                  <MessageCircle className="w-4 h-4 text-slate-400" />
+                  <span>Chat</span>
                 </Link>
 
                 <Link
@@ -85,14 +89,6 @@ export const DashboardPage = () => {
                 >
                   <TrendingUp className="w-4 h-4 text-slate-400" />
                   Progress
-                </Link>
-
-                <Link
-                  to="/chat"
-                  className="flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  <span>Chat</span>
                 </Link>
 
                 {/* Social Dropdown Menu */}

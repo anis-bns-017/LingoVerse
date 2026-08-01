@@ -3,7 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
-import { ChatGateway } from './chat.controller';
+import { ChatGateway } from './chat.gateway';
 import { PrismaService } from '../prisma.service';
 
 @Module({

@@ -1,175 +1,109 @@
 import {
-  WebSocketGateway,
-  WebSocketServer,
-  SubscribeMessage,
-  OnGatewayConnection,
-  OnGatewayDisconnect,
-  ConnectedSocket,
-  MessageBody,
-} from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '../prisma.service';
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { ChatService } from './chat.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  CreateChatDto,
+  SendMessageDto,
+  GetMessagesDto,
+  MarkReadDto,
+  AddReactionDto,
+  CreateGroupDto,
+  AddParticipantsDto,
+  RemoveParticipantDto,
+} from './dto/chat.dto';
 
-@WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
-  namespace: 'chat',
-})
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer()
-  server: Server;
+@Controller('chat')
+@UseGuards(JwtAuthGuard)
+export class ChatController {
+  constructor(private chatService: ChatService) {}
 
-  private userSockets: Map<string, string[]> = new Map(); // userId -> socketIds[]
+  // ============ CHATS ============
 
-  constructor(
-    private jwtService: JwtService,
-    private prisma: PrismaService,
-  ) {}
-
-  async handleConnection(client: Socket) {
-    try {
-      const token = client.handshake.auth.token;
-      if (!token) {
-        client.disconnect();
-        return;
-      }
-
-      const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_SECRET,
-      });
-
-      const userId = payload.sub;
-      client.data.userId = userId;
-
-      // Store socket
-      const sockets = this.userSockets.get(userId) || [];
-      sockets.push(client.id);
-      this.userSockets.set(userId, sockets);
-
-      // Join rooms for all chats the user is part of
-      const chats = await this.prisma.chat.findMany({
-        where: {
-          participants: {
-            some: { userId },
-          },
-        },
-        select: { id: true },
-      });
-
-      for (const chat of chats) {
-        await client.join(`chat:${chat.id}`);
-      }
-
-      // Emit online status
-      this.server.emit('user:online', { userId, online: true });
-
-      console.log(`User ${userId} connected (${client.id})`);
-    } catch (error) {
-      client.disconnect();
-    }
+  @Get()
+  async getUserChats(@Request() req) {
+    return this.chatService.getUserChats(req.user.id);
   }
 
-  async handleDisconnect(client: Socket) {
-    const userId = client.data.userId;
-    if (userId) {
-      const sockets = this.userSockets.get(userId) || [];
-      const index = sockets.indexOf(client.id);
-      if (index > -1) {
-        sockets.splice(index, 1);
-        if (sockets.length === 0) {
-          this.userSockets.delete(userId);
-          this.server.emit('user:offline', { userId, online: false });
-        } else {
-          this.userSockets.set(userId, sockets);
-        }
-      }
-    }
-    console.log(`Client ${client.id} disconnected`);
+  @Get(':chatId')
+  async getChatById(@Request() req, @Param('chatId') chatId: string) {
+    return this.chatService.getChatById(chatId, req.user.id);
+  }
+
+  @Post('private/:userId')
+  async createPrivateChat(@Request() req, @Param('userId') otherUserId: string) {
+    return this.chatService.createPrivateChat(req.user.id, otherUserId);
+  }
+
+  @Post('group')
+  async createGroupChat(@Request() req, @Body() dto: CreateGroupDto) {
+    return this.chatService.createGroupChat(req.user.id, {
+      type: 'GROUP',
+      name: dto.name,
+      participantIds: dto.participantIds,
+    });
+  }
+
+  @Post('group/:chatId/add')
+  async addParticipants(
+    @Request() req,
+    @Param('chatId') chatId: string,
+    @Body() dto: AddParticipantsDto,
+  ) {
+    return this.chatService.addParticipants(chatId, req.user.id, dto.userIds);
+  }
+
+  @Delete('group/:chatId/remove/:userId')
+  async removeParticipant(
+    @Request() req,
+    @Param('chatId') chatId: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    return this.chatService.removeParticipant(chatId, req.user.id, targetUserId);
   }
 
   // ============ MESSAGES ============
 
-  @SubscribeMessage('message:send')
-  async handleSendMessage(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      chatId: string;
-      content: string;
-      type?: string;
-      mediaUrl?: string;
-      fileUrl?: string;
-      replyToId?: string;
-    },
-  ) {
-    const userId = client.data.userId;
-    if (!userId) return;
-
-    // We'll call the service to save the message, then broadcast
-    // But for simplicity, we'll use the service from controller? Actually we can inject ChatService.
-    // We'll implement a service method to save and return message, then emit.
-    // But we need to avoid circular dependency. We'll use ChatService via injection.
-    // I'll add ChatService to the constructor and use it.
-    // For brevity, I'll show the pattern:
-    // const message = await this.chatService.sendMessage(userId, data);
-    // this.server.to(`chat:${data.chatId}`).emit('message:new', message);
+  @Get(':chatId/messages')
+  async getMessages(@Request() req, @Param('chatId') chatId: string, @Query() dto: GetMessagesDto) {
+    dto.chatId = chatId;
+    return this.chatService.getMessages(req.user.id, dto);
   }
 
-  // ============ TYPING ============
-
-  @SubscribeMessage('typing:start')
-  handleTypingStart(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatId: string },
-  ) {
-    const userId = client.data.userId;
-    if (!userId) return;
-    client
-      .to(`chat:${data.chatId}`)
-      .emit('typing:start', { userId, chatId: data.chatId });
+  @Post('messages')
+  async sendMessage(@Request() req, @Body() dto: SendMessageDto) {
+    return this.chatService.sendMessage(req.user.id, dto);
   }
 
-  @SubscribeMessage('typing:stop')
-  handleTypingStop(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatId: string },
-  ) {
-    const userId = client.data.userId;
-    if (!userId) return;
-    client
-      .to(`chat:${data.chatId}`)
-      .emit('typing:stop', { userId, chatId: data.chatId });
+  @Put('messages/read')
+  async markMessageRead(@Request() req, @Body() dto: MarkReadDto) {
+    return this.chatService.markMessageRead(req.user.id, dto.chatId, dto.messageId);
   }
 
-  // ============ READ RECEIPTS ============
-
-  @SubscribeMessage('message:read')
-  async handleMarkRead(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatId: string; messageId: string },
-  ) {
-    const userId = client.data.userId;
-    if (!userId) return;
-    // Mark read via service
-    // this.chatService.markMessageRead(userId, data.chatId, data.messageId);
-    // Broadcast to others
-    client
-      .to(`chat:${data.chatId}`)
-      .emit('message:read', { userId, messageId: data.messageId });
+  @Post('messages/reaction')
+  async addReaction(@Request() req, @Body() dto: AddReactionDto) {
+    return this.chatService.addReaction(req.user.id, dto.messageId, dto.emoji);
   }
 
-  // ============ REACTIONS ============
+  @Get('messages/:messageId/read-receipts')
+  async getReadReceipts(@Request() req, @Param('messageId') messageId: string) {
+    return this.chatService.getReadReceipts(messageId, req.user.id);
+  }
 
-  @SubscribeMessage('reaction:add')
-  async handleReaction(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { messageId: string; emoji: string },
-  ) {
-    const userId = client.data.userId;
-    if (!userId) return;
-    // const reaction = await this.chatService.addReaction(userId, data.messageId, data.emoji);
-    // this.server.to(`chat:${reaction.message.chatId}`).emit('reaction:new', reaction);
+  @Get('search/:chatId')
+  async searchMessages(@Request() req, @Param('chatId') chatId: string, @Query('q') query: string) {
+    return this.chatService.searchMessages(req.user.id, chatId, query);
   }
 }
