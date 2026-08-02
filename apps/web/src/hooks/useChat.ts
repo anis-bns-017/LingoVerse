@@ -207,7 +207,7 @@ export const useChatSocket = (chatId: string, userId: string) => {
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
-    const s = io('http://localhost:4000/chat', {
+    const s = io('http://localhost:3000/chat', {
       auth: { token },
       transports: ['websocket'],
     });

@@ -1,17 +1,24 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '../lib/api/client';
-import { toast } from 'sonner';
-import { useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { Room, RoomEvent, Track, LocalAudioTrack, RemoteAudioTrack, Participant } from 'livekit-client';
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "../lib/api/client";
+import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
+import { io, Socket } from "socket.io-client";
+import {
+  Room,
+  RoomEvent,
+  Track,
+  LocalAudioTrack,
+  RemoteAudioTrack,
+  Participant,
+} from "livekit-client";
 
 // ---------- Types ----------
 export interface VoiceRoom {
   id: string;
   name: string;
   description?: string;
-  type: 'OPEN' | 'PRIVATE' | 'SCHEDULED' | 'STAGE';
-  status: 'WAITING' | 'ACTIVE' | 'ENDED';
+  type: "OPEN" | "PRIVATE" | "SCHEDULED" | "STAGE";
+  status: "WAITING" | "ACTIVE" | "ENDED";
   creatorId: string;
   creator: { id: string; name: string; avatarUrl?: string };
   scheduledFor?: string;
@@ -27,7 +34,7 @@ export interface VoiceParticipant {
   id: string;
   userId: string;
   user: { id: string; name: string; avatarUrl?: string };
-  role: 'SPEAKER' | 'LISTENER' | 'STAGE_SPEAKER' | 'MODERATOR';
+  role: "SPEAKER" | "LISTENER" | "STAGE_SPEAKER" | "MODERATOR";
   isMuted: boolean;
   isDeafened: boolean;
   raisedHand: boolean;
@@ -53,12 +60,15 @@ export interface Stage {
 
 export const voiceApi = {
   getRooms: (params?: { type?: string; status?: string }) =>
-    apiClient.get<VoiceRoom[]>('/voice/rooms', { params }),
-  getRoom: (roomId: string) => apiClient.get<VoiceRoom>(`/voice/rooms/${roomId}`),
-  createRoom: (data: any) => apiClient.post<VoiceRoom>('/voice/rooms', data),
-  updateRoom: (roomId: string, data: any) => apiClient.put(`/voice/rooms/${roomId}`, data),
+    apiClient.get<VoiceRoom[]>("/voice/rooms", { params }),
+  getRoom: (roomId: string) =>
+    apiClient.get<VoiceRoom>(`/voice/rooms/${roomId}`),
+  createRoom: (data: any) => apiClient.post<VoiceRoom>("/voice/rooms", data),
+  updateRoom: (roomId: string, data: any) =>
+    apiClient.put(`/voice/rooms/${roomId}`, data),
   endRoom: (roomId: string) => apiClient.post(`/voice/rooms/${roomId}/end`),
-  joinRoom: (roomId: string) => apiClient.post<{ token: string }>(`/voice/rooms/${roomId}/join`),
+  joinRoom: (roomId: string) =>
+    apiClient.post<{ token: string }>(`/voice/rooms/${roomId}/join`),
   leaveRoom: (roomId: string) => apiClient.post(`/voice/rooms/${roomId}/leave`),
   updateRole: (roomId: string, userId: string, role: string) =>
     apiClient.put(`/voice/rooms/${roomId}/role/${userId}`, { role }),
@@ -66,14 +76,15 @@ export const voiceApi = {
     apiClient.post(`/voice/rooms/${roomId}/stage/add/${userId}`),
   removeFromStage: (roomId: string, userId: string) =>
     apiClient.post(`/voice/rooms/${roomId}/stage/remove/${userId}`),
-  getRecordings: (roomId: string) => apiClient.get(`/voice/rooms/${roomId}/recordings`),
+  getRecordings: (roomId: string) =>
+    apiClient.get(`/voice/rooms/${roomId}/recordings`),
 };
 
 // ---------- Hooks ----------
 
 export const useVoiceRooms = (filters?: { type?: string; status?: string }) => {
   return useQuery({
-    queryKey: ['voice-rooms', filters],
+    queryKey: ["voice-rooms", filters],
     queryFn: async () => {
       const response = await voiceApi.getRooms(filters);
       return response.data;
@@ -83,7 +94,7 @@ export const useVoiceRooms = (filters?: { type?: string; status?: string }) => {
 
 export const useVoiceRoom = (roomId: string) => {
   return useQuery({
-    queryKey: ['voice-room', roomId],
+    queryKey: ["voice-room", roomId],
     queryFn: async () => {
       const response = await voiceApi.getRoom(roomId);
       return response.data;
@@ -100,11 +111,11 @@ export const useCreateVoiceRoom = () => {
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['voice-rooms'] });
-      toast.success('Room created!');
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
+      toast.success("Room created!");
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to create room');
+      toast.error(error.response?.data?.message || "Failed to create room");
     },
   });
 };
@@ -117,11 +128,11 @@ export const useJoinVoiceRoom = () => {
       return response.data;
     },
     onSuccess: (_, roomId) => {
-      queryClient.invalidateQueries({ queryKey: ['voice-room', roomId] });
-      toast.success('Joined room!');
+      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
+      toast.success("Joined room!");
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to join room');
+      toast.error(error.response?.data?.message || "Failed to join room");
     },
   });
 };
@@ -133,26 +144,48 @@ export const useEndVoiceRoom = () => {
       await voiceApi.endRoom(roomId);
     },
     onSuccess: (_, roomId) => {
-      queryClient.invalidateQueries({ queryKey: ['voice-rooms'] });
-      queryClient.invalidateQueries({ queryKey: ['voice-room', roomId] });
-      toast.success('Room ended');
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
+      toast.success("Room ended");
     },
   });
 };
 
+// ---------- Socket Hook (UPDATED PORT to 3000) ----------
 export const useVoiceSocket = (roomId: string, userId: string) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [participants, setParticipants] = useState<string[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const s = io('http://localhost:4000/voice', {
+    // 👇 Don't connect until we actually have both values
+    if (!roomId || !userId) return;
+
+    const s = io('http://localhost:3000/voice', {
       withCredentials: true,
       transports: ['websocket'],
+      autoConnect: true,
     });
-    setSocket(s);
 
     s.on('connect', () => {
-      s.emit('voice:join', { roomId });
+      console.log('Connected to voice socket');
+      setIsConnected(true);
+      s.emit('voice:join', { roomId, userId });
+    });
+
+    s.on('disconnect', () => {
+      console.log('Disconnected from voice socket');
+      setIsConnected(false);
+    });
+
+    s.on('connect_error', (err) => {
+      console.error('Socket connection error:', err);
+      toast.error('Failed to connect to voice server');
+    });
+
+    s.on('voice:error', (err: { message: string }) => {
+      console.error('Voice gateway error:', err.message);
+      toast.error(err.message);
     });
 
     s.on('voice:participants', (data: { participants: string[] }) => {
@@ -171,20 +204,22 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
       // Handle hand raised event
     });
 
+    setSocket(s);
+
     return () => {
-      s.emit('voice:leave', { roomId });
+      s.emit('voice:leave', { roomId, userId });
       s.disconnect();
     };
-  }, [roomId]);
+  }, [roomId, userId]);
 
-  return { socket, participants };
+  return { socket, participants, isConnected };
 };
 
-// ---------- LiveKit Hook ----------
+// ---------- LiveKit Hook (unchanged) ----------
 export const useLiveKitRoom = (
   roomName: string,
   token: string | null,
-  options?: { onTrackSubscribed?: (track: any) => void }
+  options?: { onTrackSubscribed?: (track: any) => void },
 ) => {
   const [room, setRoom] = useState<Room | null>(null);
   const [localTrack, setLocalTrack] = useState<LocalAudioTrack | null>(null);
@@ -201,20 +236,19 @@ export const useLiveKitRoom = (
 
     const connect = async () => {
       try {
-        await livekitRoom.connect('wss://localhost:7880', token);
-        // Publish local audio
-        const local = await livekitRoom.localParticipant.setMicrophoneEnabled(true);
+        await livekitRoom.connect("wss://localhost:7880", token);
+        const local =
+          await livekitRoom.localParticipant.setMicrophoneEnabled(true);
         setLocalTrack(local);
 
-        // Track subscriptions
         livekitRoom.on(RoomEvent.TrackSubscribed, (track: any) => {
-          if (track.kind === 'audio') {
+          if (track.kind === "audio") {
             setRemoteTracks((prev) => [...prev, track]);
           }
         });
 
         livekitRoom.on(RoomEvent.TrackUnsubscribed, (track: any) => {
-          if (track.kind === 'audio') {
+          if (track.kind === "audio") {
             setRemoteTracks((prev) => prev.filter((t) => t !== track));
           }
         });
@@ -223,7 +257,7 @@ export const useLiveKitRoom = (
           livekitRoom.on(RoomEvent.TrackSubscribed, options.onTrackSubscribed);
         }
       } catch (error) {
-        console.error('LiveKit connection error:', error);
+        console.error("LiveKit connection error:", error);
       }
     };
 
@@ -235,4 +269,42 @@ export const useLiveKitRoom = (
   }, [token, roomName]);
 
   return { room, localTrack, remoteTracks };
+};
+
+export const useAddToStage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      roomId,
+      userId,
+    }: {
+      roomId: string;
+      userId: string;
+    }) => {
+      const response = await voiceApi.addToStage(roomId, userId);
+      return response.data;
+    },
+    onSuccess: (_, { roomId }) => {
+      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
+    },
+  });
+};
+
+export const useRemoveFromStage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      roomId,
+      userId,
+    }: {
+      roomId: string;
+      userId: string;
+    }) => {
+      const response = await voiceApi.removeFromStage(roomId, userId);
+      return response.data;
+    },
+    onSuccess: (_, { roomId }) => {
+      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
+    },
+  });
 };

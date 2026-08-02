@@ -1,19 +1,21 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
   Request,
+  Req,
   Res,
   UseGuards,
+  UnauthorizedException, // ✅ now imported
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request as ExpressRequest, Response } from 'express';
 
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
 
@@ -33,14 +35,14 @@ export class AuthController {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     res.cookie('refreshToken', result.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     });
 
     return {
@@ -80,10 +82,16 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(
-    @Body() dto: RefreshTokenDto,
+    @Req() req: ExpressRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.refreshToken(dto.refreshToken);
+    // Read refresh token from HTTP‑only cookie
+    const refreshToken = req.cookies?.refreshToken;
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token not found');
+    }
+
+    const result = await this.authService.refreshToken(refreshToken);
 
     res.cookie('accessToken', result.accessToken, {
       httpOnly: true,
@@ -92,16 +100,34 @@ export class AuthController {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
+    // Optional: rotate the refresh token
+    // res.cookie('refreshToken', result.refreshToken, { ... });
+
     return {
       user: result.user,
     };
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async getMe(@Request() req: ExpressRequest) {
+    return req.user; // The user object from JwtStrategy (contains id, email, etc.)
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Request() req, @Res({ passthrough: true }) res: Response) {
-    await this.authService.logout(req.user.id);
+  async logout(
+    @Request() req: ExpressRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // TypeScript safety: ensure user exists and has an id
+    const user = req.user as any;
+    if (!user || !user.id) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    await this.authService.logout(user.id);
 
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');

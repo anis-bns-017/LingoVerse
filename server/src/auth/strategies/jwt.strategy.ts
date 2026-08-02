@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Request } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma.service';
 
@@ -14,10 +15,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!secret) {
       throw new Error('JWT_SECRET is not defined in environment variables');
     }
+
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
+        // 1. Try Authorization header (Bearer token)
         ExtractJwt.fromAuthHeaderAsBearerToken(),
-        (req) => req?.cookies?.accessToken,
+        // 2. Fallback to HTTP‑only cookie (requires cookie-parser middleware)
+        (req: Request) => {
+          return req?.cookies?.accessToken || null;
+        },
       ]),
       ignoreExpiration: false,
       secretOrKey: secret,
