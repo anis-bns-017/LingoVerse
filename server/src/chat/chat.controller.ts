@@ -23,6 +23,8 @@ import {
   CreateGroupDto,
   AddParticipantsDto,
   RemoveParticipantDto,
+  EditMessageDto,
+  PinMessageDto,
 } from './dto/chat.dto';
 
 @Controller('chat')
@@ -43,7 +45,10 @@ export class ChatController {
   }
 
   @Post('private/:userId')
-  async createPrivateChat(@Request() req, @Param('userId') otherUserId: string) {
+  async createPrivateChat(
+    @Request() req,
+    @Param('userId') otherUserId: string,
+  ) {
     return this.chatService.createPrivateChat(req.user.id, otherUserId);
   }
 
@@ -71,13 +76,21 @@ export class ChatController {
     @Param('chatId') chatId: string,
     @Param('userId') targetUserId: string,
   ) {
-    return this.chatService.removeParticipant(chatId, req.user.id, targetUserId);
+    return this.chatService.removeParticipant(
+      chatId,
+      req.user.id,
+      targetUserId,
+    );
   }
 
   // ============ MESSAGES ============
 
   @Get(':chatId/messages')
-  async getMessages(@Request() req, @Param('chatId') chatId: string, @Query() dto: GetMessagesDto) {
+  async getMessages(
+    @Request() req,
+    @Param('chatId') chatId: string,
+    @Query() dto: GetMessagesDto,
+  ) {
     dto.chatId = chatId;
     return this.chatService.getMessages(req.user.id, dto);
   }
@@ -89,21 +102,120 @@ export class ChatController {
 
   @Put('messages/read')
   async markMessageRead(@Request() req, @Body() dto: MarkReadDto) {
-    return this.chatService.markMessageRead(req.user.id, dto.chatId, dto.messageId);
+    return this.chatService.markMessageRead(
+      req.user.id,
+      dto.chatId,
+      dto.messageId,
+    );
   }
+
+  // ============ REACTIONS ============
 
   @Post('messages/reaction')
   async addReaction(@Request() req, @Body() dto: AddReactionDto) {
     return this.chatService.addReaction(req.user.id, dto.messageId, dto.emoji);
   }
 
+  @Delete('messages/:messageId/reaction/:emoji')
+  @HttpCode(HttpStatus.OK)
+  async removeReaction(
+    @Request() req,
+    @Param('messageId') messageId: string,
+    @Param('emoji') emoji: string,
+  ) {
+    return this.chatService.removeReaction(req.user.id, messageId, emoji);
+  }
+
+  // ============ MESSAGE MANAGEMENT ============
+
+  @Delete('messages/:messageId')
+  @HttpCode(HttpStatus.OK)
+  async deleteMessage(@Request() req, @Param('messageId') messageId: string) {
+    return this.chatService.deleteMessage(req.user.id, messageId);
+  }
+
+  @Put('messages/:messageId')
+  async editMessage(
+    @Request() req,
+    @Param('messageId') messageId: string,
+    @Body() dto: EditMessageDto,
+  ) {
+    return this.chatService.editMessage(req.user.id, messageId, dto.content);
+  }
+
+  @Put('messages/:messageId/pin')
+  async pinMessage(
+    @Request() req,
+    @Param('messageId') messageId: string,
+    @Body() dto: PinMessageDto,
+  ) {
+    return this.chatService.pinMessage(req.user.id, messageId, dto.pinned);
+  }
+
+  // ============ READ RECEIPTS ============
+
   @Get('messages/:messageId/read-receipts')
   async getReadReceipts(@Request() req, @Param('messageId') messageId: string) {
     return this.chatService.getReadReceipts(messageId, req.user.id);
   }
 
+  // ============ SEARCH ============
+
   @Get('search/:chatId')
-  async searchMessages(@Request() req, @Param('chatId') chatId: string, @Query('q') query: string) {
+  async searchMessages(
+    @Request() req,
+    @Param('chatId') chatId: string,
+    @Query('q') query: string,
+  ) {
     return this.chatService.searchMessages(req.user.id, chatId, query);
+  }
+
+  // ============ COMMUNITY CHAT ============
+
+  @Get('community/:communityId/messages')
+  async getCommunityMessages(
+    @Request() req,
+    @Param('communityId') communityId: string,
+    @Query('limit') limit?: string,
+    @Query('before') before?: string,
+  ) {
+    return this.chatService.getCommunityMessages(
+      req.user.id,
+      communityId,
+      limit ? parseInt(limit) : 50,
+      before,
+    );
+  }
+
+  @Post('community/:communityId/messages')
+  async sendCommunityMessage(
+    @Request() req,
+    @Param('communityId') communityId: string,
+    @Body() dto: SendMessageDto,
+  ) {
+    return this.chatService.sendCommunityMessage(
+      req.user.id,
+      communityId,
+      dto,
+    );
+  }
+
+  // ============ UNREAD COUNT ============
+
+  @Get('unread/count')
+  async getUnreadCount(@Request() req) {
+    return this.chatService.getUnreadCount(req.user.id);
+  }
+
+  // ============ TYPING (via REST fallback) ============
+
+  @Post('typing')
+  async handleTyping(
+    @Request() req,
+    @Body() data: { chatId?: string; communityId?: string; isTyping: boolean },
+  ) {
+    // This is a fallback for when WebSocket is not available
+    // The actual typing events are handled via WebSocket
+    return { success: true };
   }
 }

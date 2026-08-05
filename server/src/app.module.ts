@@ -10,6 +10,7 @@ import { PrismaService } from './prisma.service';
 import { VoiceModule } from './voice/voice.module';
 import { ChatModule } from './chat/chat.module';
 import { LearningModule } from './learning/learning.module';
+import { CommunitiesModule } from './communities/communities.module';
 import { FriendsModule } from './friends/friends.module';
 
 @Module({
@@ -23,6 +24,7 @@ import { FriendsModule } from './friends/friends.module';
     FriendsModule,
     ChatModule,
     VoiceModule,
+    CommunitiesModule,
   ],
   providers: [PrismaService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

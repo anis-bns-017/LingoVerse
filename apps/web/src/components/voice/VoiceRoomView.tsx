@@ -1,13 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useVoiceRoom, useVoiceSocket, useLiveKitRoom, voiceApi } from '../../hooks/useVoice';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { 
+  useVoiceRoom, 
+  useVoiceSocket, 
+  useLiveKitRoom, 
+  voiceApi,
+  useRoomMessages,
+  useSendVoiceMessage,
+  useDeleteVoiceMessage,
+  useLeaveVoiceRoom,
+  type VoiceMessage,
+  type VoiceParticipant,
+} from '../../hooks/useVoice';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import { 
   Mic, MicOff, Hand, PhoneOff, Users, 
   MessageCircle, X, Pin, Trash2, 
   UserX, VolumeX, Crown, Send,
-  MoreVertical, Flag
+  MoreVertical, Loader2, Check,
+  Pencil, Reply, Flag, Volume2,
+  Mic as MicIcon,
 } from 'lucide-react';
+import { format } from 'date-fns';
 
 interface VoiceRoomViewProps {
   roomId: string;
@@ -46,30 +60,34 @@ function hueFromString(str: string) {
 }
 
 // ---------- Chat Message Component ----------
-interface ChatMessage {
-  id: string;
-  userId: string;
-  userName: string;
-  userAvatar?: string;
-  content: string;
-  isPinned: boolean;
-  createdAt: Date;
-  isHost?: boolean;
-}
-
 const ChatMessageBubble: React.FC<{
-  message: ChatMessage;
+  message: VoiceMessage;
   isOwn: boolean;
   isHost: boolean;
+  onReply: () => void;
   onPin: () => void;
   onDelete: () => void;
   onKick: () => void;
   onMute: () => void;
-}> = ({ message, isOwn, isHost, onPin, onDelete, onKick, onMute }) => {
+}> = ({ message, isOwn, isHost, onReply, onPin, onDelete, onKick, onMute }) => {
   const [showActions, setShowActions] = useState(false);
 
+  const formatTime = (date: string) => {
+    return format(new Date(date), 'h:mm a');
+  };
+
+  if (message.isDeleted) {
+    return (
+      <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-2 opacity-50`}>
+        <div className="p-3 rounded-xl bg-gray-800/30">
+          <p className="text-sm text-gray-400 italic">This message was deleted</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-2`}>
+    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-2 group`}>
       <div className="relative max-w-[80%]">
         <div
           className={`p-3 rounded-xl ${
@@ -87,13 +105,13 @@ const ChatMessageBubble: React.FC<{
           )}
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-semibold" style={{ color: COLORS.textPrimary }}>
-              {message.userName}
+              {message.sender?.name || 'Unknown'}
             </span>
-            {message.isHost && (
+            {isHost && (
               <Crown className="w-3 h-3 text-yellow-400" />
             )}
             <span className="text-xs" style={{ color: COLORS.textMuted }}>
-              {new Date(message.createdAt).toLocaleTimeString()}
+              {formatTime(message.createdAt)}
             </span>
           </div>
           <p className="text-sm" style={{ color: COLORS.textPrimary }}>
@@ -101,55 +119,52 @@ const ChatMessageBubble: React.FC<{
           </p>
         </div>
 
-        {/* Action menu - visible to host or message owner */}
-        {(isHost || isOwn) && (
-          <div className="absolute -top-2 -right-2">
+        {/* Action buttons - visible on hover */}
+        <div className={`absolute ${isOwn ? '-left-14' : '-right-14'} top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity`}>
+          <button
+            onClick={onReply}
+            className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"
+            title="Reply"
+          >
+            <Reply className="w-3 h-3 text-gray-300" />
+          </button>
+          {isHost && (
             <button
-              onClick={() => setShowActions(!showActions)}
-              className="p-1 rounded-full bg-gray-800 hover:bg-gray-700"
+              onClick={onPin}
+              className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"
+              title={message.isPinned ? 'Unpin' : 'Pin'}
             >
-              <MoreVertical className="w-3 h-3" style={{ color: COLORS.textMuted }} />
+              <Pin className={`w-3 h-3 ${message.isPinned ? 'text-yellow-400' : 'text-gray-300'}`} />
             </button>
-            {showActions && (
-              <div className="absolute right-0 mt-1 bg-gray-800 rounded-lg shadow-lg p-1 z-10 min-w-[120px]">
-                {isHost && (
-                  <>
-                    <button
-                      onClick={() => { onPin(); setShowActions(false); }}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-gray-700 rounded"
-                      style={{ color: COLORS.textPrimary }}
-                    >
-                      <Pin className="w-3 h-3" /> {message.isPinned ? 'Unpin' : 'Pin'}
-                    </button>
-                    <button
-                      onClick={() => { onMute(); setShowActions(false); }}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-gray-700 rounded"
-                      style={{ color: COLORS.textPrimary }}
-                    >
-                      <VolumeX className="w-3 h-3" /> Mute
-                    </button>
-                    <button
-                      onClick={() => { onKick(); setShowActions(false); }}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-red-600/20 rounded"
-                      style={{ color: '#F87171' }}
-                    >
-                      <UserX className="w-3 h-3" /> Kick
-                    </button>
-                  </>
-                )}
-                {isOwn && (
-                  <button
-                    onClick={() => { onDelete(); setShowActions(false); }}
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-red-600/20 rounded"
-                    style={{ color: '#F87171' }}
-                  >
-                    <Trash2 className="w-3 h-3" /> Delete
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+          )}
+          {isHost && (
+            <button
+              onClick={onKick}
+              className="p-1.5 bg-gray-700 hover:bg-red-600 rounded-full transition-colors"
+              title="Kick"
+            >
+              <UserX className="w-3 h-3 text-gray-300" />
+            </button>
+          )}
+          {isHost && (
+            <button
+              onClick={onMute}
+              className="p-1.5 bg-gray-700 hover:bg-red-600 rounded-full transition-colors"
+              title="Mute"
+            >
+              <VolumeX className="w-3 h-3 text-gray-300" />
+            </button>
+          )}
+          {(isOwn || isHost) && (
+            <button
+              onClick={onDelete}
+              className="p-1.5 bg-gray-700 hover:bg-red-600 rounded-full transition-colors"
+              title="Delete"
+            >
+              <Trash2 className="w-3 h-3 text-gray-300" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -159,42 +174,48 @@ const ChatMessageBubble: React.FC<{
 export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave }) => {
   const { user } = useAuth();
   const { data: room, isLoading, refetch } = useVoiceRoom(roomId);
+  const { data: initialMessages } = useRoomMessages(roomId);
+  const sendMessageMutation = useSendVoiceMessage();
+  const deleteMessageMutation = useDeleteVoiceMessage();
+  const leaveRoomMutation = useLeaveVoiceRoom();
+
   const [token, setToken] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
-  const [showChat, setShowChat] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [showChat, setShowChat] = useState(true);
+  const [messages, setMessages] = useState<VoiceMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [pinnedMessages, setPinnedMessages] = useState<Set<string>>(new Set());
+  const [replyTo, setReplyTo] = useState<VoiceMessage | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Mock chat messages - in production these come from WebSocket
+  // Load messages from API
   useEffect(() => {
-    // Simulate initial messages
-    setChatMessages([
-      {
-        id: '1',
-        userId: 'system',
-        userName: '🎙️ Host',
-        content: `Welcome to "${room?.name || 'Voice Room'}"!`,
-        isPinned: true,
-        createdAt: new Date(),
-        isHost: true,
-      },
-      {
-        id: '2',
-        userId: 'system',
-        userName: '📢 Announcement',
-        content: 'Speak clearly and respect others. Have fun!',
-        isPinned: false,
-        createdAt: new Date(),
-      },
-    ]);
-    setPinnedMessages(new Set(['1']));
-  }, [room]);
+    if (initialMessages) {
+      setMessages(initialMessages);
+    }
+  }, [initialMessages]);
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  // Socket for real-time updates
+  const { 
+    socket, 
+    isConnected, 
+    participants: wsParticipants, 
+    typingUsers,
+    hostId,
+    sendChatMessage,
+    sendTyping,
+    raiseHand,
+    kickUser,
+    muteUser,
+    unmuteUser,
+    pinMessage,
+    deleteMessage: deleteSocketMessage,
+    muteSelf,
+  } = useVoiceSocket(roomId, user?.id || '');
 
   // Get LiveKit token
   useEffect(() => {
@@ -206,115 +227,140 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
         setToken(res.data.token);
       } catch (error: any) {
         toast.error(error.response?.data?.message || 'Failed to join room');
-        onLeave();
       } finally {
         setIsJoining(false);
       }
     };
     getToken();
-  }, [roomId, onLeave]);
+  }, [roomId]);
 
-  const { socket, participants: wsParticipants = [] } = useVoiceSocket(roomId, user?.id || '');
-
+  // LiveKit room
   const liveKitRoomId = room?.liveKitRoomId || '';
   const {
-    isConnected,
-    participants: livekitParticipants = [],
-    remoteTracks = {},
+    isConnected: isLiveKitConnected,
+    participants: livekitParticipants,
+    remoteTracks,
     toggleMute,
     isMuted,
-    error,
+    error: liveKitError,
   } = useLiveKitRoom(
     liveKitRoomId,
     token,
-    (identity) => console.log('Participant joined:', identity),
-    (identity) => console.log('Participant left:', identity),
+    {
+      onTrackSubscribed: (track) => {
+        console.log('Track subscribed:', track);
+      },
+      onTrackUnsubscribed: (track) => {
+        console.log('Track unsubscribed:', track);
+      },
+      onParticipantConnected: (participant) => {
+        console.log('Participant connected:', participant.identity);
+      },
+      onParticipantDisconnected: (participant) => {
+        console.log('Participant disconnected:', participant.identity);
+      },
+    }
   );
 
-  // ---- Host Controls ----
-  const isHost = room?.creatorId === user?.id;
+  // ---- Handle incoming socket messages ----
+  useEffect(() => {
+    if (!socket) return;
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
-    const msg: ChatMessage = {
-      id: Date.now().toString(),
-      userId: user?.id || 'unknown',
-      userName: user?.name || 'Anonymous',
-      content: newMessage.trim(),
-      isPinned: false,
-      createdAt: new Date(),
-      isHost: isHost,
+    const handleNewMessage = (message: VoiceMessage) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === message.id)) return prev;
+        return [...prev, message];
+      });
     };
-    setChatMessages([...chatMessages, msg]);
+
+    const handleMessageDeleted = (data: { messageId: string }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId 
+            ? { ...m, isDeleted: true, content: 'This message was deleted' } 
+            : m
+        )
+      );
+    };
+
+    const handleMessagePinned = (data: { messageId: string; pinned: boolean }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId ? { ...m, isPinned: data.pinned } : m
+        )
+      );
+    };
+
+    socket.on('voice:chat', handleNewMessage);
+    socket.on('voice:message-deleted', handleMessageDeleted);
+    socket.on('voice:message-pinned', handleMessagePinned);
+
+    return () => {
+      socket.off('voice:chat', handleNewMessage);
+      socket.off('voice:message-deleted', handleMessageDeleted);
+      socket.off('voice:message-pinned', handleMessagePinned);
+    };
+  }, [socket]);
+
+  // ---- Scroll to bottom ----
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ---- Handle sending message ----
+  const handleSendMessage = useCallback(() => {
+    if (!newMessage.trim()) return;
+
+    const messageData = {
+      content: newMessage.trim(),
+      type: 'TEXT',
+      replyToId: replyTo?.id,
+    };
+
+    // Send via WebSocket for real-time
+    if (socket && isConnected) {
+      sendChatMessage(messageData);
+    } else {
+      // Fallback to REST API
+      sendMessageMutation.mutate({
+        roomId,
+        content: messageData.content,
+        type: messageData.type,
+        replyToId: messageData.replyToId,
+      });
+    }
+
     setNewMessage('');
-    // In production, emit to WebSocket
-    if (socket) {
-      socket.emit('voice:chat', { roomId, message: msg });
-    }
+    setReplyTo(null);
+  }, [newMessage, replyTo, socket, isConnected, sendChatMessage, sendMessageMutation, roomId]);
+
+  // ---- Handle typing ----
+  const handleTyping = (isTyping: boolean) => {
+    sendTyping(isTyping);
   };
 
-  const handlePinMessage = (messageId: string) => {
-    setChatMessages(prev =>
-      prev.map(msg =>
-        msg.id === messageId
-          ? { ...msg, isPinned: !msg.isPinned }
-          : msg
-      )
-    );
-    const msg = chatMessages.find(m => m.id === messageId);
-    if (msg) {
-      toast.success(msg.isPinned ? 'Message unpinned' : 'Message pinned');
-    }
-  };
-
-  const handleDeleteMessage = (messageId: string) => {
-    setChatMessages(prev => prev.filter(m => m.id !== messageId));
-    toast.success('Message deleted');
-  };
-
-  const handleKickUser = (userId: string) => {
-    if (!isHost) {
-      toast.error('Only the host can kick members');
-      return;
-    }
-    // In production, call API to kick user
-    toast.success('User kicked from room');
-    // Emit to WebSocket
-    if (socket) {
-      socket.emit('voice:kick', { roomId, userId });
-    }
-  };
-
-  const handleMuteUser = (userId: string) => {
-    if (!isHost) {
-      toast.error('Only the host can mute members');
-      return;
-    }
-    // In production, call API to mute user via LiveKit
-    toast.success('User muted');
-    if (socket) {
-      socket.emit('voice:mute-user', { roomId, userId });
-    }
-  };
-
+  // ---- Handle raise hand ----
   const handleRaiseHand = () => {
-    if (socket) {
-      socket.emit('voice:raise-hand', { roomId, raise: true });
-      toast.success("Hand raised — you're in the queue");
-    }
+    raiseHand(true);
+    toast.success("Hand raised — you're in the queue");
   };
 
+  // ---- Handle leave ----
   const handleLeave = async () => {
     try {
-      await voiceApi.leaveRoom(roomId);
+      await leaveRoomMutation.mutateAsync(roomId);
       socket?.emit('voice:leave', { roomId });
       toast.success('Left room');
       onLeave();
-    } catch {
-      toast.error('Failed to leave');
+    } catch (error) {
+      toast.error('Failed to leave room');
     }
   };
 
+  // ---- Host controls ----
+  const isHost = hostId === user?.id;
+
+  // ---- Render loading ----
   if (isLoading || isJoining) {
     return (
       <div
@@ -322,16 +368,16 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
         style={{ background: COLORS.void, color: COLORS.textMuted }}
       >
         <div className="text-center">
-          <div
-            className="w-10 h-10 rounded-full border-2 border-t-transparent animate-spin mx-auto mb-3"
-            style={{ borderColor: COLORS.spotlight, borderTopColor: 'transparent' }}
-          />
-          Taking your seat…
+          <Loader2 className="w-10 h-10 animate-spin mx-auto mb-3" style={{ color: COLORS.spotlight }} />
+          <p className="text-sm" style={{ color: COLORS.textMuted }}>
+            {isJoining ? 'Joining room...' : 'Loading room...'}
+          </p>
         </div>
       </div>
     );
   }
 
+  // ---- Render room not found ----
   if (!room) {
     return (
       <div
@@ -355,23 +401,25 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
     );
   }
 
-  const knownUserIds = new Set(wsParticipants);
-  const totalCount = Math.max(room.participants?.length || 0, wsParticipants.length || 0, 1);
+  const totalParticipants = wsParticipants.length || room.participants?.length || 0;
 
   return (
     <div className="min-h-screen font-sans flex flex-col" style={{ background: COLORS.void }}>
       {/* Top bar */}
       <div
-        className="flex items-center justify-between px-6 py-4 border-b"
+        className="flex items-center justify-between px-6 py-4 border-b shrink-0"
         style={{ borderColor: COLORS.border }}
       >
         <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span
               className="text-[10px] font-mono tracking-widest uppercase px-2 py-0.5 rounded-full"
-              style={{ background: COLORS.liveDim, color: COLORS.live }}
+              style={{ 
+                background: isLiveKitConnected ? COLORS.liveDim : COLORS.border,
+                color: isLiveKitConnected ? COLORS.live : COLORS.textMuted 
+              }}
             >
-              ● Live
+              {isLiveKitConnected ? '● Live' : '○ Connecting'}
             </span>
             <span
               className="text-[10px] font-mono tracking-widest uppercase"
@@ -404,9 +452,9 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
             className="p-2 rounded-full hover:bg-white/5 transition-colors relative"
           >
             <MessageCircle className="w-5 h-5" style={{ color: COLORS.textMuted }} />
-            {chatMessages.length > 0 && (
+            {messages.length > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 text-[10px] rounded-full flex items-center justify-center bg-yellow-500 text-black font-bold">
-                {chatMessages.length}
+                {messages.length}
               </span>
             )}
           </button>
@@ -415,17 +463,17 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
             style={{ color: COLORS.textMuted }}
           >
             <Users className="w-3.5 h-3.5" />
-            {totalCount}
+            {totalParticipants}
           </div>
         </div>
       </div>
 
-      {error && (
+      {liveKitError && (
         <div
           className="mx-6 mt-4 px-4 py-3 rounded-xl text-sm"
           style={{ background: 'rgba(248, 113, 113, 0.12)', color: '#F87171' }}
         >
-          {error}
+          {liveKitError}
         </div>
       )}
 
@@ -433,7 +481,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
       <div className="flex flex-1 overflow-hidden">
         {/* Participants grid */}
         <div
-          className={`flex-1 px-6 py-10 transition-all duration-300 ${
+          className={`flex-1 px-6 py-10 transition-all duration-300 overflow-y-auto ${
             showChat ? 'w-2/3' : 'w-full'
           }`}
           style={{
@@ -444,7 +492,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
             {/* You */}
             <div className="flex flex-col items-center">
               <div className="relative">
-                {!isMuted && (
+                {!isMuted && isLiveKitConnected && (
                   <span
                     className="absolute inset-0 rounded-full animate-ping"
                     style={{ border: `2px solid ${COLORS.spotlight}`, opacity: 0.5 }}
@@ -475,20 +523,20 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
                   <Mic className="w-3 h-3" style={{ color: COLORS.live }} />
                 )}
                 <span className="text-[11px]" style={{ color: COLORS.textMuted }}>
-                  you {isMuted ? '· muted' : '· live'}
+                  {isMuted ? '· muted' : '· live'}
                 </span>
               </div>
             </div>
 
             {/* Remote LiveKit participants */}
             {livekitParticipants.map((p: any) => {
-              const speaking = !!remoteTracks[p.identity];
+              const hasAudio = !!remoteTracks[p.identity];
               const hue = hueFromString(p.name || p.identity);
-              const isParticipantHost = room?.creatorId === p.identity;
+              const isParticipantHost = hostId === p.identity;
               return (
                 <div key={p.identity} className="flex flex-col items-center group relative">
                   <div className="relative">
-                    {speaking && (
+                    {hasAudio && (
                       <span
                         className="absolute inset-0 rounded-full animate-ping"
                         style={{ border: `2px solid ${COLORS.live}`, opacity: 0.5 }}
@@ -498,9 +546,9 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
                       className="relative w-16 h-16 rounded-full flex items-center justify-center font-serif text-lg font-semibold border-2"
                       style={{
                         background: `hsl(${hue}, 40%, 22%)`,
-                        borderColor: speaking ? COLORS.live : COLORS.border,
+                        borderColor: hasAudio ? COLORS.live : COLORS.border,
                         color: COLORS.textPrimary,
-                        boxShadow: speaking ? `0 0 20px ${COLORS.liveDim}` : 'none',
+                        boxShadow: hasAudio ? `0 0 20px ${COLORS.liveDim}` : 'none',
                       }}
                     >
                       {initials(p.name || p.identity)}
@@ -516,7 +564,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
                     {p.name || p.identity}
                   </span>
                   <span className="text-[11px] mt-0.5" style={{ color: COLORS.textMuted }}>
-                    {speaking ? '🔊 speaking' : '🔇 quiet'}
+                    {hasAudio ? '🔊 speaking' : '🔇 quiet'}
                   </span>
                 </div>
               );
@@ -524,13 +572,13 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
 
             {/* Fallback: participants known only via WebSocket */}
             {wsParticipants
-              .filter((uid: string) => uid !== user?.id)
-              .map((uid: string) => {
-                const participant = room.participants?.find((p: any) => p.userId === uid);
-                const name = participant?.user?.name || 'Learner';
+              .filter((p: any) => p.userId !== user?.id)
+              .map((p: any) => {
+                const name = p.user?.name || 'Learner';
                 const hue = hueFromString(name);
+                const isParticipantHost = hostId === p.userId;
                 return (
-                  <div key={uid} className="flex flex-col items-center">
+                  <div key={p.userId} className="flex flex-col items-center">
                     <div
                       className="w-16 h-16 rounded-full flex items-center justify-center font-serif text-lg font-semibold border-2"
                       style={{
@@ -545,13 +593,13 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
                       className="text-sm font-medium mt-2 truncate max-w-full"
                       style={{ color: COLORS.textPrimary }}
                     >
-                      {name}
+                      {name} {isParticipantHost && '👑'}
                     </span>
                     <div className="flex items-center gap-1 mt-0.5">
                       <span className="text-[11px]" style={{ color: COLORS.textMuted }}>
-                        {participant?.role?.toLowerCase() || 'listener'}
+                        {p.role?.toLowerCase() || 'listener'}
                       </span>
-                      {participant?.raisedHand && (
+                      {p.raisedHand && (
                         <Hand className="w-3 h-3" style={{ color: COLORS.spotlight }} />
                       )}
                     </div>
@@ -567,37 +615,79 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
             className="w-1/3 border-l flex flex-col"
             style={{ borderColor: COLORS.border, background: COLORS.surface }}
           >
-            <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: COLORS.border }}>
+            <div className="p-3 border-b flex items-center justify-between shrink-0" style={{ borderColor: COLORS.border }}>
               <span className="font-semibold" style={{ color: COLORS.textPrimary }}>
                 Room Chat
               </span>
-              <button
-                onClick={() => setShowChat(false)}
-                className="p-1 rounded hover:bg-white/5"
-              >
-                <X className="w-4 h-4" style={{ color: COLORS.textMuted }} />
-              </button>
+              <div className="flex items-center gap-2">
+                {typingUsers.size > 0 && (
+                  <span className="text-xs text-indigo-400 animate-pulse">
+                    {typingUsers.size} typing...
+                  </span>
+                )}
+                <button
+                  onClick={() => setShowChat(false)}
+                  className="p-1 rounded hover:bg-white/5"
+                >
+                  <X className="w-4 h-4" style={{ color: COLORS.textMuted }} />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {chatMessages.map((msg) => (
-                <ChatMessageBubble
-                  key={msg.id}
-                  message={msg}
-                  isOwn={msg.userId === user?.id}
-                  isHost={isHost}
-                  onPin={() => handlePinMessage(msg.id)}
-                  onDelete={() => handleDeleteMessage(msg.id)}
-                  onKick={() => handleKickUser(msg.userId)}
-                  onMute={() => handleMuteUser(msg.userId)}
-                />
-              ))}
+              {messages.length > 0 ? (
+                messages.map((msg) => (
+                  <ChatMessageBubble
+                    key={msg.id}
+                    message={msg}
+                    isOwn={msg.senderId === user?.id}
+                    isHost={isHost}
+                    onReply={() => setReplyTo(msg)}
+                    onPin={() => pinMessage(msg.id, !msg.isPinned)}
+                    onDelete={() => {
+                      if (socket && isConnected) {
+                        deleteSocketMessage(msg.id);
+                      } else {
+                        deleteMessageMutation.mutate({ roomId, messageId: msg.id });
+                      }
+                    }}
+                    onKick={() => kickUser(msg.senderId)}
+                    onMute={() => muteUser(msg.senderId)}
+                  />
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <p className="text-sm" style={{ color: COLORS.textMuted }}>
+                    No messages yet
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: COLORS.textMuted }}>
+                    Start the conversation!
+                  </p>
+                </div>
+              )}
               <div ref={chatEndRef} />
             </div>
-            <div className="p-3 border-t flex gap-2" style={{ borderColor: COLORS.border }}>
+            {/* Reply indicator */}
+            {replyTo && (
+              <div className="px-3 py-2 border-t flex items-center justify-between shrink-0" style={{ borderColor: COLORS.border }}>
+                <div className="flex items-center gap-2 text-sm">
+                  <Reply className="w-4 h-4" style={{ color: COLORS.textMuted }} />
+                  <span className="text-xs truncate max-w-[150px]" style={{ color: COLORS.textMuted }}>
+                    {replyTo.content}
+                  </span>
+                </div>
+                <button onClick={() => setReplyTo(null)}>
+                  <X className="w-4 h-4" style={{ color: COLORS.textMuted }} />
+                </button>
+              </div>
+            )}
+            <div className="p-3 border-t flex gap-2 shrink-0" style={{ borderColor: COLORS.border }}>
               <input
                 type="text"
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={(e) => {
+                  setNewMessage(e.target.value);
+                  handleTyping(e.target.value.length > 0);
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder="Type a message..."
                 className="flex-1 px-3 py-2 rounded-full text-sm outline-none"
@@ -610,7 +700,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
               <button
                 onClick={handleSendMessage}
                 disabled={!newMessage.trim()}
-                className="p-2 rounded-full disabled:opacity-50"
+                className="p-2 rounded-full disabled:opacity-50 transition-opacity"
                 style={{ background: COLORS.spotlight, color: COLORS.void }}
               >
                 <Send className="w-4 h-4" />
@@ -622,7 +712,7 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
 
       {/* Sticky control bar */}
       <div
-        className="sticky bottom-0 px-6 py-4 border-t flex items-center justify-center gap-3"
+        className="sticky bottom-0 px-6 py-4 border-t flex items-center justify-center gap-3 shrink-0 flex-wrap"
         style={{ background: COLORS.surfaceRaised, borderColor: COLORS.border }}
       >
         <button
@@ -646,6 +736,31 @@ export const VoiceRoomView: React.FC<VoiceRoomViewProps> = ({ roomId, onLeave })
           <Hand className="w-4 h-4" />
           Raise Hand
         </button>
+
+        {isHost && (
+          <>
+            <button
+              onClick={() => {
+                // Start recording logic here
+                voiceApi.startRecording(roomId).then(() => {
+                  toast.success('Recording started');
+                  refetch();
+                }).catch(() => {
+                  toast.error('Failed to start recording');
+                });
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm border transition-colors"
+              style={{
+                background: 'rgba(239, 68, 68, 0.1)',
+                borderColor: '#EF4444',
+                color: '#EF4444',
+              }}
+            >
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              Record
+            </button>
+          </>
+        )}
 
         <button
           onClick={handleLeave}

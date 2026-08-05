@@ -18,6 +18,9 @@ import { ChatPage } from "../pages/ChatPage";
 import { VoicePage } from "../pages/VoicePage";
 import { VoiceRoomView } from "../components/voice/VoiceRoomView";
 import { VoiceRoomPage } from "../components/voice/VoiceRoomPage";
+import { CommunitiesPage } from "../pages/CommunitiesPage";
+import { CommunityPage } from "../pages/CommunityPage";
+import { JoinCommunityPage } from "../pages/JoinCommunityPage";
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -146,6 +149,31 @@ export const AppRoutes = () => {
           element={
             <ProtectedRoute>
               <VoiceRoomPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/communities"
+          element={
+            <ProtectedRoute>
+              <CommunitiesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/communities/:communityId"
+          element={
+            <ProtectedRoute>
+              <CommunityPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/communities/join/:code"
+          element={
+            <ProtectedRoute>
+              <JoinCommunityPage />
             </ProtectedRoute>
           }
         />

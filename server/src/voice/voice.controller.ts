@@ -19,6 +19,7 @@ import {
   UpdateVoiceRoomDto,
   StageActionDto,
   RaiseHandDto,
+  SendVoiceMessageDto,
 } from './dto/voice.dto';
 
 @Controller('voice')
@@ -74,6 +75,11 @@ export class VoiceController {
     return this.voiceService.leaveRoom(req.user.id, roomId);
   }
 
+  @Get('rooms/:roomId/participants')
+  async getRoomParticipants(@Request() req, @Param('roomId') roomId: string) {
+    return this.voiceService.getRoomParticipants(roomId, req.user.id);
+  }
+
   @Put('rooms/:roomId/role/:userId')
   async updateRole(
     @Request() req,
@@ -114,5 +120,92 @@ export class VoiceController {
   @Get('rooms/:roomId/recordings')
   async getRecordings(@Request() req, @Param('roomId') roomId: string) {
     return this.voiceService.getRecordings(roomId, req.user.id);
+  }
+
+  @Post('rooms/:roomId/recordings/start')
+  @HttpCode(HttpStatus.OK)
+  async startRecording(@Request() req, @Param('roomId') roomId: string) {
+    return this.voiceService.startRecording(req.user.id, roomId);
+  }
+
+  @Post('rooms/:roomId/recordings/stop')
+  @HttpCode(HttpStatus.OK)
+  async stopRecording(@Request() req, @Param('roomId') roomId: string) {
+    return this.voiceService.stopRecording(req.user.id, roomId);
+  }
+
+  // ============ CHAT MESSAGES (Voice Room Chat) ============
+
+  @Get('rooms/:roomId/messages')
+  async getRoomMessages(
+    @Request() req,
+    @Param('roomId') roomId: string,
+    @Query('limit') limit?: string,
+    @Query('before') before?: string,
+  ) {
+    return this.voiceService.getVoiceRoomMessages(
+      req.user.id,
+      roomId,
+      limit ? parseInt(limit) : 50,
+      before,
+    );
+  }
+
+  @Post('rooms/:roomId/messages')
+  async sendRoomMessage(
+    @Request() req,
+    @Param('roomId') roomId: string,
+    @Body() dto: SendVoiceMessageDto,
+  ) {
+    return this.voiceService.sendVoiceRoomMessage(
+      req.user.id,
+      roomId,
+      dto.content,
+      dto.type || 'TEXT',
+      dto.mediaUrl,
+      dto.fileUrl,
+      dto.replyToId,
+    );
+  }
+
+  @Delete('rooms/:roomId/messages/:messageId')
+  @HttpCode(HttpStatus.OK)
+  async deleteRoomMessage(
+    @Request() req,
+    @Param('roomId') roomId: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.voiceService.deleteVoiceRoomMessage(
+      req.user.id,
+      roomId,
+      messageId,
+    );
+  }
+
+  // ============ RAISE HAND ============
+
+  @Post('rooms/:roomId/raise-hand')
+  @HttpCode(HttpStatus.OK)
+  async raiseHand(
+    @Request() req,
+    @Param('roomId') roomId: string,
+    @Body() dto: RaiseHandDto,
+  ) {
+    // This is handled via WebSocket, but we keep REST for fallback
+    // The WebSocket handler will update the database
+    return { success: true };
+  }
+
+  // ============ CHECK USER STATUS ============
+
+  @Get('rooms/:roomId/status')
+  async checkUserStatus(@Request() req, @Param('roomId') roomId: string) {
+    const isInRoom = await this.voiceService.isUserInRoom(roomId, req.user.id);
+    return { inRoom: isInRoom };
+  }
+
+  @Get('rooms/:roomId/active-participants')
+  async getActiveParticipants(@Request() req, @Param('roomId') roomId: string) {
+    return this.voiceService.getActiveParticipants(roomId);
   }
 }

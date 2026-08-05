@@ -185,6 +185,23 @@ enum BadgeType {
   DIAMOND
 }
 
+model ChatParticipant {
+  id         String              @id @default(cuid())
+  chatId     String
+  chat       Chat                @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       ChatParticipantRole @default(MEMBER)
+  isMuted    Boolean             @default(false)
+  isPinned   Boolean             @default(false)
+  joinedAt   DateTime            @default(now())
+  lastReadAt DateTime            @default(now())
+
+  @@unique([chatId, userId])
+  @@index([chatId])
+  @@index([userId])
+}
+
 enum ChallengeType {
   DAILY
   WEEKLY
@@ -480,6 +497,7 @@ model User {
   // ---- FIX: removed voiceRooms and added createdRooms with relation ----
   createdRooms           VoiceRoom[]             @relation("RoomCreator")
   voiceParticipants      VoiceParticipant[]
+  voiceRoomMessages      VoiceRoomMessage[]
   recordings             Recording[]
   ownedCommunities       Community[]             @relation("CommunityCreator")
   communityMembers       CommunityMember[]
@@ -680,27 +698,29 @@ model Chat {
   @@index([ownerId])
 }
 
-model ChatParticipant {
-  id         String              @id @default(cuid())
-  chatId     String
-  chat       Chat                @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role       ChatParticipantRole @default(MEMBER)
-  isMuted    Boolean             @default(false)
-  isPinned   Boolean             @default(false)
-  joinedAt   DateTime            @default(now())
-  lastReadAt DateTime            @default(now())
+model CommunityMember {
+  id          String              @id @default(cuid())
+  communityId String
+  community   Community           @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        CommunityMemberRole @default(MEMBER)
+  isMuted     Boolean             @default(false)
+  isPinned    Boolean             @default(false)
+  joinedAt    DateTime            @default(now())
+  lastActive  DateTime            @default(now())
 
-  @@unique([chatId, userId])
-  @@index([chatId])
+  @@unique([communityId, userId])
+  @@index([communityId])
   @@index([userId])
 }
 
 model Message {
   id           String               @id @default(cuid())
-  chatId       String
-  chat         Chat                 @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  chatId       String? // 👈 Made optional
+  chat         Chat?                @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  communityId  String? // 👈 ADD THIS
+  community    Community?           @relation(fields: [communityId], references: [id], onDelete: Cascade)
   senderId     String
   sender       User                 @relation(fields: [senderId], references: [id], onDelete: Cascade)
   content      String?
@@ -712,6 +732,7 @@ model Message {
   replies      Message[]            @relation("MessageReply")
   isEdited     Boolean              @default(false)
   isDeleted    Boolean              @default(false)
+  isPinned     Boolean              @default(false)
   editedAt     DateTime?
   deletedAt    DateTime?
   reactions    Reaction[]
@@ -722,8 +743,10 @@ model Message {
   updatedAt    DateTime             @updatedAt
 
   @@index([chatId])
+  @@index([communityId])
   @@index([senderId])
   @@index([replyToId])
+  @@index([isPinned])
 }
 
 model Reaction {
@@ -780,22 +803,36 @@ model MessageAttachment {
 
 // ----- Communities -----
 model Community {
-  id          String            @id @default(cuid())
+  id          String        @id @default(cuid())
   name        String
   description String?
   avatarUrl   String?
   bannerUrl   String?
   ownerId     String
-  owner       User              @relation("CommunityCreator", fields: [ownerId], references: [id], onDelete: Cascade)
-  type        CommunityType     @default(PUBLIC)
-  channels    Channel[]
-  members     CommunityMember[]
-  bans        CommunityBan[]
-  roles       CommunityRole[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  owner       User          @relation("CommunityCreator", fields: [ownerId], references: [id], onDelete: Cascade)
+  type        CommunityType @default(PUBLIC)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  @@index([ownerId])
+  channels Channel[]
+  members  CommunityMember[]
+  bans     CommunityBan[]
+  roles    CommunityRole[]
+  invites  CommunityInvite[]
+  messages Message[]
+}
+
+model CommunityInvite {
+  id          String    @id @default(cuid())
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  code        String    @unique
+  maxUses     Int       @default(0)
+  uses        Int       @default(0)
+  expiresAt   DateTime?
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model Channel {
@@ -849,21 +886,6 @@ model ThreadMessage {
   @@index([authorId])
 }
 
-model CommunityMember {
-  id          String              @id @default(cuid())
-  communityId String
-  community   Community           @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role        CommunityMemberRole @default(MEMBER)
-  joinedAt    DateTime            @default(now())
-  lastActive  DateTime            @default(now())
-
-  @@unique([communityId, userId])
-  @@index([communityId])
-  @@index([userId])
-}
-
 model CommunityRole {
   id          String    @id @default(cuid())
   communityId String
@@ -879,6 +901,20 @@ model CommunityRole {
 
   @@index([communityId])
   @@index([userId])
+}
+
+model VoiceRoomMessage {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([roomId])
+  @@index([senderId])
 }
 
 model CommunityBan {
@@ -1540,6 +1576,7 @@ model VoiceRoom {
   participants VoiceParticipant[]
   recordings   Recording[]
   stages       Stage[]
+  messages     VoiceRoomMessage[]
 }
 
 model VoiceParticipant {

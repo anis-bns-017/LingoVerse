@@ -3,9 +3,12 @@ import {
   IsOptional,
   IsArray,
   IsEnum,
-  IsUUID,
-  IsObject,
   IsBoolean,
+  IsInt,
+  Min,
+  IsUUID,
+  IsNumber,
+  IsNotEmpty,
 } from 'class-validator';
 
 export class CreateChatDto {
@@ -17,16 +20,23 @@ export class CreateChatDto {
   name?: string;
 
   @IsArray()
-  @IsUUID(4, { each: true })
+  @IsString({ each: true }) // cuid, not UUID
   participantIds: string[];
 }
 
 export class SendMessageDto {
+  @IsOptional()
   @IsString()
-  chatId: string;
+  chatId?: string;
 
+  @IsOptional()
   @IsString()
-  content: string;
+  communityId?: string;
+
+  // Optional: voice notes, images, gifs, and stickers can be sent with no text content
+  @IsOptional()
+  @IsString()
+  content?: string;
 
   @IsOptional()
   @IsEnum([
@@ -38,6 +48,9 @@ export class SendMessageDto {
     'VOICE_NOTE',
     'GIF',
     'STICKER',
+    'LOCATION',
+    'CONTACT',
+    'SYSTEM',
   ])
   type?: string;
 
@@ -50,13 +63,23 @@ export class SendMessageDto {
   fileUrl?: string;
 
   @IsOptional()
-  @IsUUID(4)
+  @IsString() // cuid, not UUID
   replyToId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  duration?: number; // For voice messages
 }
 
 export class GetMessagesDto {
+  @IsOptional()
   @IsString()
-  chatId: string;
+  chatId?: string;
+
+  @IsOptional()
+  @IsString()
+  communityId?: string;
 
   @IsOptional()
   @IsString()
@@ -76,8 +99,13 @@ export class MarkReadDto {
 }
 
 export class TypingDto {
+  @IsOptional()
   @IsString()
-  chatId: string;
+  chatId?: string;
+
+  @IsOptional()
+  @IsString()
+  communityId?: string;
 
   @IsBoolean()
   isTyping: boolean;
@@ -91,22 +119,182 @@ export class AddReactionDto {
   emoji: string;
 }
 
+export class RemoveReactionDto {
+  @IsString()
+  messageId: string;
+
+  @IsString()
+  emoji: string;
+}
+
 export class CreateGroupDto {
   @IsString()
   name: string;
 
   @IsArray()
-  @IsUUID(4, { each: true })
+  @IsString({ each: true }) // cuid, not UUID
   participantIds: string[];
 }
 
 export class AddParticipantsDto {
   @IsArray()
-  @IsUUID(4, { each: true })
+  @IsString({ each: true }) // cuid, not UUID
   userIds: string[];
 }
 
 export class RemoveParticipantDto {
-  @IsUUID(4)
+  @IsString() // cuid, not UUID
   userId: string;
+}
+
+// ============ NEW DTOS ============
+
+export class EditMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  content: string;
+}
+
+export class PinMessageDto {
+  @IsBoolean()
+  pinned: boolean;
+}
+
+export class DeleteMessageDto {
+  @IsString()
+  messageId: string;
+}
+
+export class GetCommunityMessagesDto {
+  @IsString()
+  communityId: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  before?: string;
+}
+
+export class SearchMessagesDto {
+  @IsString()
+  chatId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  query: string;
+}
+
+export class SendVoiceMessageDto {
+  @IsString()
+  chatId: string;
+
+  @IsString()
+  audioUrl: string;
+
+  @IsNumber()
+  @Min(1)
+  duration: number;
+
+  @IsOptional()
+  @IsString()
+  replyToId?: string;
+}
+
+export class PinChatDto {
+  @IsString()
+  chatId: string;
+
+  @IsBoolean()
+  pinned: boolean;
+}
+
+export class MuteChatDto {
+  @IsString()
+  chatId: string;
+
+  @IsBoolean()
+  muted: boolean;
+}
+
+export class MessageFilterDto {
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @IsOptional()
+  @IsString()
+  senderId?: string;
+
+  @IsOptional()
+  @IsString()
+  fromDate?: string;
+
+  @IsOptional()
+  @IsString()
+  toDate?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  hasMedia?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isPinned?: boolean;
+}
+
+export class MessageResponseDto {
+  id: string;
+  chatId?: string;
+  communityId?: string;
+  senderId: string;
+  sender?: {
+    id: string;
+    name: string;
+    email: string;
+    avatarUrl?: string;
+  };
+  content: string | null;
+  type: string;
+  mediaUrl?: string;
+  fileUrl?: string;
+  replyToId?: string;
+  replyTo?: any;
+  isEdited: boolean;
+  isDeleted: boolean;
+  isPinned: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  reactions?: any[];
+  attachments?: any[];
+  translations?: any[];
+}
+
+export class ChatResponseDto {
+  id: string;
+  type: 'PRIVATE' | 'GROUP' | 'CHANNEL' | 'THREAD';
+  name?: string;
+  description?: string;
+  avatarUrl?: string;
+  isPublic?: boolean;
+  ownerId?: string;
+  participants?: any[];
+  messages?: any[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export class UnreadCountDto {
+  chatId: string;
+  count: number;
+}
+
+export class TypingResponseDto {
+  userId: string;
+  chatId?: string;
+  communityId?: string;
+  isTyping: boolean;
 }

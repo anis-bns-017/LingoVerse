@@ -1,7 +1,22 @@
-import { IsString, IsOptional, IsEnum, IsArray, IsUUID, IsBoolean, IsDateString, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsArray,
+  IsUUID,
+  IsBoolean,
+  IsDateString,
+  IsNumber,
+  Min,
+  Max,
+  IsNotEmpty,
+} from 'class-validator';
+
+// ============ ROOM DTOS ============
 
 export class CreateVoiceRoomDto {
   @IsString()
+  @IsNotEmpty()
   name: string;
 
   @IsOptional()
@@ -17,17 +32,14 @@ export class CreateVoiceRoomDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(2)
+  @Max(100)
   maxParticipants?: number;
 
   @IsOptional()
   @IsArray()
   @IsUUID(4, { each: true })
   invitedUserIds?: string[];
-}
-
-export class JoinVoiceRoomDto {
-  @IsString()
-  roomId: string;
 }
 
 export class UpdateVoiceRoomDto {
@@ -42,20 +54,249 @@ export class UpdateVoiceRoomDto {
   @IsOptional()
   @IsBoolean()
   isRecording?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(2)
+  @Max(100)
+  maxParticipants?: number;
 }
+
+// ============ PARTICIPANT DTOS ============
+
+export class JoinVoiceRoomDto {
+  @IsString()
+  @IsNotEmpty()
+  roomId: string;
+}
+
+export class LeaveVoiceRoomDto {
+  @IsString()
+  @IsNotEmpty()
+  roomId: string;
+}
+
+export class UpdateRoleDto {
+  @IsEnum(['SPEAKER', 'LISTENER', 'STAGE_SPEAKER', 'MODERATOR'])
+  role: 'SPEAKER' | 'LISTENER' | 'STAGE_SPEAKER' | 'MODERATOR';
+}
+
+export class KickUserDto {
+  @IsUUID(4)
+  userId: string;
+}
+
+export class MuteUserDto {
+  @IsUUID(4)
+  userId: string;
+}
+
+// ============ STAGE DTOS ============
 
 export class StageActionDto {
   @IsString()
+  @IsNotEmpty()
   roomId: string;
 
   @IsUUID(4)
   userId: string;
 }
 
+export class CreateStageDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(4, { each: true })
+  speakers?: string[];
+}
+
+// ============ HAND DTOS ============
+
 export class RaiseHandDto {
   @IsString()
+  @IsNotEmpty()
   roomId: string;
 
   @IsBoolean()
   raise: boolean;
+}
+
+// ============ CHAT MESSAGE DTOS ============
+
+export class SendVoiceMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  content: string;
+
+  @IsOptional()
+  @IsEnum([
+    'TEXT',
+    'IMAGE',
+    'VIDEO',
+    'AUDIO',
+    'FILE',
+    'VOICE_NOTE',
+    'GIF',
+    'STICKER',
+    'LOCATION',
+    'CONTACT',
+  ])
+  type?: string;
+
+  @IsOptional()
+  @IsString()
+  mediaUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  fileUrl?: string;
+
+  @IsOptional()
+  @IsUUID(4)
+  replyToId?: string;
+}
+
+export class VoiceMessageHistoryDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @IsOptional()
+  @IsUUID(4)
+  before?: string;
+}
+
+// ============ RECORDING DTOS ============
+
+export class StartRecordingDto {
+  @IsUUID(4)
+  roomId: string;
+}
+
+export class StopRecordingDto {
+  @IsUUID(4)
+  roomId: string;
+}
+
+// ============ PIN DTOS ============
+
+export class PinMessageDto {
+  @IsUUID(4)
+  messageId: string;
+
+  @IsBoolean()
+  pinned: boolean;
+}
+
+// ============ DELETE DTOS ============
+
+export class DeleteMessageDto {
+  @IsUUID(4)
+  messageId: string;
+}
+
+// ============ RESPONSE DTOS ============
+
+export class VoiceRoomResponseDto {
+  id: string;
+  name: string;
+  description?: string;
+  type: string;
+  status: string;
+  creatorId: string;
+  creator?: {
+    id: string;
+    name: string;
+    avatarUrl?: string;
+  };
+  scheduledFor?: Date;
+  maxParticipants: number;
+  isRecording: boolean;
+  liveKitRoomId?: string;
+  participants?: VoiceParticipantResponseDto[];
+  recordings?: RecordingResponseDto[];
+  stages?: StageResponseDto[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export class VoiceParticipantResponseDto {
+  id: string;
+  userId: string;
+  user?: {
+    id: string;
+    name: string;
+    avatarUrl?: string;
+  };
+  role: string;
+  isMuted: boolean;
+  isDeafened: boolean;
+  raisedHand: boolean;
+  joinedAt: Date;
+  leftAt?: Date;
+}
+
+export class RecordingResponseDto {
+  id: string;
+  url: string;
+  duration: number;
+  size?: number;
+  transcript?: string;
+  createdAt: Date;
+}
+
+export class StageResponseDto {
+  id: string;
+  name: string;
+  speakers: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ============ QUERY DTOS ============
+
+export class VoiceRoomQueryDto {
+  @IsOptional()
+  @IsEnum(['OPEN', 'PRIVATE', 'SCHEDULED', 'STAGE'])
+  type?: string;
+
+  @IsOptional()
+  @IsEnum(['WAITING', 'ACTIVE', 'ENDED', 'CANCELLED'])
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+// ============ LIVEKIT DTOS ============
+
+export class LiveKitTokenDto {
+  token: string;
+  roomName: string;
+  participantIdentity: string;
+  expiresAt: Date;
+}
+
+export class LiveKitRoomDto {
+  name: string;
+  maxParticipants?: number;
+  emptyTimeout?: number;
+  creationTime?: bigint;
 }

@@ -1,5 +1,12 @@
 import React, { useState } from "react";
-import { useVoiceRooms, useCreateVoiceRoom, useEndVoiceRoom } from "../hooks/useVoice";
+import { 
+  useVoiceRooms, 
+  useCreateVoiceRoom, 
+  useEndVoiceRoom,
+  useJoinVoiceRoom,
+  useLeaveVoiceRoom,
+  type VoiceRoom,
+} from "../hooks/useVoice";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
@@ -18,9 +25,12 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  MessageCircle,
+  Clock,
+  Crown,
 } from "lucide-react";
 
-// ---- Shared theater palette (also used in StageSpeaker.tsx) ----
+// ---- Shared theater palette ----
 const COLORS = {
   void: "#0B0714",
   surface: "#1C1430",
@@ -61,9 +71,11 @@ function hueFromString(str: string) {
 export const VoicePage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { data: rooms, isLoading } = useVoiceRooms();
+  const { data: rooms, isLoading, refetch } = useVoiceRooms();
   const createRoom = useCreateVoiceRoom();
   const endRoom = useEndVoiceRoom();
+  const joinRoom = useJoinVoiceRoom();
+  const leaveRoom = useLeaveVoiceRoom();
 
   const [showCreate, setShowCreate] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -79,6 +91,7 @@ export const VoicePage = () => {
   const [joinPassword, setJoinPassword] = useState("");
   const [joinError, setJoinError] = useState("");
   const [showJoinPassword, setShowJoinPassword] = useState(false);
+  const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,42 +111,83 @@ export const VoicePage = () => {
       if (formData.type === "PRIVATE") payload.password = formData.password;
 
       const newRoom = await createRoom.mutateAsync(payload);
-      toast.success("Room created");
+      toast.success("Room created! 🎉");
       setShowCreate(false);
       setFormData({ name: "", description: "", type: "OPEN", maxParticipants: 50, password: "" });
+      
+      // Navigate to the room
       navigate(`/voice/${newRoom.id}`);
-    } catch {
-      // handled by mutation
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to create room");
     }
   };
 
-  const handleJoin = (room: any) => {
+  const handleJoin = async (room: VoiceRoom) => {
     const isCreator = room.creatorId === user?.id;
+    
+    // Check if room is ended
+    if (room.status === "ENDED") {
+      toast.error("This room has ended");
+      return;
+    }
+
+    // Check if room is full
+    const currentParticipants = room.participants?.length || 0;
+    if (currentParticipants >= room.maxParticipants) {
+      toast.error("This room is full");
+      return;
+    }
+
+    // If private and not creator, show password modal
     if (room.type === "PRIVATE" && !isCreator) {
       setJoinTarget({ id: room.id, name: room.name });
       setJoinPassword("");
       setJoinError("");
       return;
     }
-    navigate(`/voice/${room.id}`);
+
+    // Join the room
+    try {
+      setJoiningRoomId(room.id);
+      await joinRoom.mutateAsync(room.id);
+      navigate(`/voice/${room.id}`);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to join room");
+    } finally {
+      setJoiningRoomId(null);
+    }
   };
 
-  const handleConfirmJoinWithPassword = () => {
+  const handleConfirmJoinWithPassword = async () => {
     if (!joinTarget) return;
     if (!joinPassword.trim()) {
       setJoinError("Password is required");
       return;
     }
-    navigate(`/voice/${joinTarget.id}`, { state: { password: joinPassword } });
-    setJoinTarget(null);
-    setJoinPassword("");
-    setJoinError("");
+
+    try {
+      setJoiningRoomId(joinTarget.id);
+      await joinRoom.mutateAsync(joinTarget.id);
+      navigate(`/voice/${joinTarget.id}`, { state: { password: joinPassword } });
+      setJoinTarget(null);
+      setJoinPassword("");
+      setJoinError("");
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Failed to join room");
+    } finally {
+      setJoiningRoomId(null);
+    }
   };
 
   const handleEnd = async (roomId: string) => {
     if (window.confirm("End this room for everyone?")) {
-      await endRoom.mutateAsync(roomId);
-      toast.success("Room ended");
+      try {
+        await endRoom.mutateAsync(roomId);
+        toast.success("Room ended");
+        refetch();
+      } catch (error: any) {
+        toast.error(error.response?.data?.message || "Failed to end room");
+      }
     }
   };
 
@@ -154,7 +208,7 @@ export const VoicePage = () => {
               className="text-[10px] font-mono tracking-widest uppercase px-2 py-0.5 rounded-full"
               style={{ background: COLORS.spotlightDim, color: COLORS.spotlight }}
             >
-              Now Playing
+              🎤 Live Conversations
             </span>
             <h1
               className="font-serif text-3xl sm:text-4xl mt-2"
@@ -192,7 +246,7 @@ export const VoicePage = () => {
               </h2>
               <button
                 onClick={() => setShowCreate(false)}
-                className="p-1.5 rounded-lg transition-colors"
+                className="p-1.5 rounded-lg transition-colors hover:bg-white/5"
                 style={{ color: COLORS.textMuted }}
               >
                 <X className="w-5 h-5" />
@@ -214,7 +268,7 @@ export const VoicePage = () => {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="e.g. Spanish Conversation Practice"
                     required
-                    className="w-full px-4 py-2.5 rounded-xl border outline-none text-sm transition-colors"
+                    className="w-full px-4 py-2.5 rounded-xl border outline-none text-sm transition-colors focus:border-[#F5A623]"
                     style={{
                       background: COLORS.surfaceRaised,
                       borderColor: COLORS.border,
@@ -242,10 +296,10 @@ export const VoicePage = () => {
                       color: COLORS.textPrimary,
                     }}
                   >
-                    <option value="OPEN">Open</option>
-                    <option value="PRIVATE">Private</option>
-                    <option value="STAGE">Stage</option>
-                    <option value="SCHEDULED">Scheduled</option>
+                    <option value="OPEN">🔓 Open</option>
+                    <option value="PRIVATE">🔒 Private</option>
+                    <option value="STAGE">🎭 Stage</option>
+                    <option value="SCHEDULED">📅 Scheduled</option>
                   </select>
                 </div>
 
@@ -327,7 +381,7 @@ export const VoicePage = () => {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     placeholder="What will this room be about?"
                     rows={3}
-                    className="w-full px-4 py-2.5 rounded-xl border outline-none text-sm resize-none"
+                    className="w-full px-4 py-2.5 rounded-xl border outline-none text-sm resize-none focus:border-[#F5A623]"
                     style={{
                       background: COLORS.surfaceRaised,
                       borderColor: COLORS.border,
@@ -341,7 +395,7 @@ export const VoicePage = () => {
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}
-                  className="px-5 py-2.5 text-sm font-medium rounded-xl transition-colors"
+                  className="px-5 py-2.5 text-sm font-medium rounded-xl transition-colors hover:bg-white/5"
                   style={{ color: COLORS.textMuted }}
                 >
                   Cancel
@@ -414,7 +468,7 @@ export const VoicePage = () => {
           </div>
         )}
 
-        {/* Room list — ticket stubs */}
+        {/* Room list */}
         {!isLoading && rooms && rooms.length > 0 && (
           <div className="space-y-4">
             {rooms.map((room) => {
@@ -423,19 +477,22 @@ export const VoicePage = () => {
               const accent = TYPE_ACCENTS[room.type] || TYPE_ACCENTS.OPEN;
               const isEnded = room.status === "ENDED";
               const isCreator = room.creatorId === user?.id;
+              const isFull = (room.participants?.length || 0) >= room.maxParticipants;
               const previewParticipants = (room.participants || []).slice(0, 4);
+              const isJoining = joiningRoomId === room.id;
 
               return (
                 <div
                   key={room.id}
-                  className="flex rounded-2xl border overflow-hidden transition-opacity"
+                  className={`flex rounded-2xl border overflow-hidden transition-all ${
+                    isEnded ? 'opacity-40' : 'hover:border-opacity-70'
+                  }`}
                   style={{
                     background: COLORS.surface,
                     borderColor: COLORS.border,
-                    opacity: isEnded ? 0.5 : 1,
                   }}
                 >
-                  <div className="w-1.5 shrink-0" style={{ background: accent }} />
+                  <div className="w-1.5 shrink-0" style={{ background: isEnded ? COLORS.textMuted : accent }} />
 
                   <div
                     className="w-px shrink-0 my-3"
@@ -446,10 +503,10 @@ export const VoicePage = () => {
 
                   <div className="flex-1 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-w-0">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2.5 mb-1.5">
+                      <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
                         <h3
                           className="font-serif text-lg truncate"
-                          style={{ color: COLORS.textPrimary }}
+                          style={{ color: isEnded ? COLORS.textMuted : COLORS.textPrimary }}
                         >
                           {room.name}
                         </h3>
@@ -465,12 +522,36 @@ export const VoicePage = () => {
                             />
                           </span>
                         )}
+                        {isEnded && (
+                          <span
+                            className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full"
+                            style={{ background: COLORS.border, color: COLORS.textMuted }}
+                          >
+                            Ended
+                          </span>
+                        )}
+                        {isFull && !isEnded && (
+                          <span
+                            className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full"
+                            style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#EF4444' }}
+                          >
+                            Full
+                          </span>
+                        )}
+                        {isCreator && !isEnded && (
+                          <span
+                            className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full"
+                            style={{ background: COLORS.spotlightDim, color: COLORS.spotlight }}
+                          >
+                            👑 Host
+                          </span>
+                        )}
                       </div>
 
                       {room.description && (
                         <p
                           className="text-sm mb-3 line-clamp-2"
-                          style={{ color: COLORS.textMuted }}
+                          style={{ color: isEnded ? COLORS.textMuted : COLORS.textMuted }}
                         >
                           {room.description}
                         </p>
@@ -510,9 +591,12 @@ export const VoicePage = () => {
                           {room.participants?.length || 0}/{room.maxParticipants || 50}
                         </span>
 
-                        <span className="text-xs capitalize" style={{ color: COLORS.textMuted }}>
-                          {room.status?.toLowerCase()}
-                        </span>
+                        {room.scheduledFor && (
+                          <span className="text-xs font-mono" style={{ color: COLORS.textMuted }}>
+                            <Clock className="w-3 h-3 inline mr-1" />
+                            {new Date(room.scheduledFor).toLocaleDateString()}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -520,21 +604,27 @@ export const VoicePage = () => {
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           onClick={() => handleJoin(room)}
-                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full font-semibold text-sm transition-transform hover:scale-105"
-                          style={{ background: accent, color: COLORS.void }}
+                          disabled={isFull || isJoining}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{
+                            background: isFull ? COLORS.textMuted : accent,
+                            color: isFull ? COLORS.void : COLORS.void,
+                          }}
                         >
-                          {room.type === "PRIVATE" && !isCreator ? (
+                          {isJoining ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : room.type === "PRIVATE" && !isCreator ? (
                             <Lock className="w-4 h-4" />
                           ) : (
                             <LogIn className="w-4 h-4" />
                           )}
-                          Join
+                          {isJoining ? 'Joining...' : 'Join'}
                         </button>
 
-                        {isCreator && (
+                        {isCreator && !isEnded && (
                           <button
                             onClick={() => handleEnd(room.id)}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium border transition-colors"
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium border transition-colors hover:bg-white/5"
                             style={{ borderColor: COLORS.border, color: COLORS.textMuted }}
                           >
                             <Square className="w-3.5 h-3.5" />
@@ -615,17 +705,22 @@ export const VoicePage = () => {
             <div className="flex items-center justify-end gap-3 pt-1">
               <button
                 onClick={() => setJoinTarget(null)}
-                className="px-4 py-2.5 text-sm font-medium rounded-xl"
+                className="px-4 py-2.5 text-sm font-medium rounded-xl transition-colors hover:bg-white/5"
                 style={{ color: COLORS.textMuted }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmJoinWithPassword}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm"
+                disabled={joiningRoomId !== null}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm disabled:opacity-60"
                 style={{ background: COLORS.spotlight, color: COLORS.void }}
               >
-                <LogIn className="w-4 h-4" />
+                {joiningRoomId ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <LogIn className="w-4 h-4" />
+                )}
                 Join room
               </button>
             </div>
