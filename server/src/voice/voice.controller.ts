@@ -95,6 +95,18 @@ export class VoiceController {
     );
   }
 
+  // ============ HOST PROMOTION ============
+
+  @Post('rooms/:roomId/promote-host/:userId')
+  @HttpCode(HttpStatus.OK)
+  async promoteHost(
+    @Request() req,
+    @Param('roomId') roomId: string,
+    @Param('userId') newHostId: string,
+  ) {
+    return this.voiceService.promoteHost(req.user.id, roomId, newHostId);
+  }
+
   // ============ STAGE ============
 
   @Post('rooms/:roomId/stage/add/:userId')

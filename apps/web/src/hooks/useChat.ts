@@ -132,10 +132,23 @@ export const chatApi = {
     apiClient.put(`/chat/messages/${messageId}`, { content }),
   pinMessage: (messageId: string, pinned: boolean) =>
     apiClient.put(`/chat/messages/${messageId}/pin`, { pinned }),
-  getCommunityMessages: (communityId: string, params?: { limit?: number; before?: string }) =>
-    apiClient.get<Message[]>(`/communities/${communityId}/messages`, { params }),
-  sendCommunityMessage: (communityId: string, data: { content: string; type?: string; mediaUrl?: string; fileUrl?: string; replyToId?: string }) =>
-    apiClient.post<Message>(`/communities/${communityId}/messages`, data),
+  getCommunityMessages: (
+    communityId: string,
+    params?: { limit?: number; before?: string },
+  ) =>
+    apiClient.get<Message[]>(`/communities/${communityId}/messages`, {
+      params,
+    }),
+  sendCommunityMessage: (
+    communityId: string,
+    data: {
+      content: string;
+      type?: string;
+      mediaUrl?: string;
+      fileUrl?: string;
+      replyToId?: string;
+    },
+  ) => apiClient.post<Message>(`/communities/${communityId}/messages`, data),
 };
 
 // ---------- Query hooks ----------
@@ -166,7 +179,6 @@ export const useMessages = (chatId: string, limit = 50) => {
     queryKey: ["messages", chatId],
     queryFn: async () => {
       const response = await chatApi.getMessages(chatId, { limit });
-      // Return newest first for display (reverse for chronological)
       return response.data.slice().reverse();
     },
     enabled: !!chatId,
@@ -177,7 +189,9 @@ export const useCommunityMessages = (communityId: string, limit = 50) => {
   return useQuery({
     queryKey: ["community-messages", communityId],
     queryFn: async () => {
-      const response = await chatApi.getCommunityMessages(communityId, { limit });
+      const response = await chatApi.getCommunityMessages(communityId, {
+        limit,
+      });
       return response.data.slice().reverse();
     },
     enabled: !!communityId,
@@ -194,12 +208,12 @@ export const useSendMessage = () => {
       return response.data;
     },
     onSuccess: (message, variables) => {
-      const queryKey = variables.chatId 
-        ? ["messages", variables.chatId] 
-        : variables.communityId 
-          ? ["community-messages", variables.communityId] 
+      const queryKey = variables.chatId
+        ? ["messages", variables.chatId]
+        : variables.communityId
+          ? ["community-messages", variables.communityId]
           : null;
-      
+
       if (queryKey) {
         queryClient.setQueryData<Message[]>(queryKey, (old) => {
           if (!old) return [message];
@@ -218,27 +232,27 @@ export const useSendMessage = () => {
 export const useSendCommunityMessage = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ 
-      communityId, 
-      content, 
-      type, 
-      mediaUrl, 
-      fileUrl, 
-      replyToId 
-    }: { 
-      communityId: string; 
-      content: string; 
-      type?: string; 
-      mediaUrl?: string; 
-      fileUrl?: string; 
+    mutationFn: async ({
+      communityId,
+      content,
+      type,
+      mediaUrl,
+      fileUrl,
+      replyToId,
+    }: {
+      communityId: string;
+      content: string;
+      type?: string;
+      mediaUrl?: string;
+      fileUrl?: string;
       replyToId?: string;
     }) => {
-      const response = await chatApi.sendCommunityMessage(communityId, { 
-        content, 
-        type, 
-        mediaUrl, 
-        fileUrl, 
-        replyToId 
+      const response = await chatApi.sendCommunityMessage(communityId, {
+        content,
+        type,
+        mediaUrl,
+        fileUrl,
+        replyToId,
       });
       return response.data;
     },
@@ -266,12 +280,17 @@ export const useDeleteMessage = () => {
       await chatApi.deleteMessage(messageId);
     },
     onSuccess: (_, messageId) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) => 
-          m.id === messageId ? { ...m, isDeleted: true, content: "Message deleted" } : m
-        );
-      });
+      queryClient.setQueriesData<Message[]>(
+        { queryKey: ["messages"] },
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === messageId
+              ? { ...m, isDeleted: true, content: "Message deleted" }
+              : m,
+          );
+        },
+      );
       toast.success("Message deleted");
     },
     onError: (error: any) => {
@@ -283,17 +302,28 @@ export const useDeleteMessage = () => {
 export const useEditMessage = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ messageId, content }: { messageId: string; content: string }) => {
+    mutationFn: async ({
+      messageId,
+      content,
+    }: {
+      messageId: string;
+      content: string;
+    }) => {
       const response = await chatApi.editMessage(messageId, content);
       return response.data;
     },
     onSuccess: (message) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) => 
-          m.id === message.id ? { ...m, content: message.content, isEdited: true } : m
-        );
-      });
+      queryClient.setQueriesData<Message[]>(
+        { queryKey: ["messages"] },
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === message.id
+              ? { ...m, content: message.content, isEdited: true }
+              : m,
+          );
+        },
+      );
       toast.success("Message edited");
     },
     onError: (error: any) => {
@@ -305,17 +335,26 @@ export const useEditMessage = () => {
 export const usePinMessage = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ messageId, pinned }: { messageId: string; pinned: boolean }) => {
+    mutationFn: async ({
+      messageId,
+      pinned,
+    }: {
+      messageId: string;
+      pinned: boolean;
+    }) => {
       const response = await chatApi.pinMessage(messageId, pinned);
       return response.data;
     },
     onSuccess: (message) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) => 
-          m.id === message.id ? { ...m, isPinned: message.isPinned } : m
-        );
-      });
+      queryClient.setQueriesData<Message[]>(
+        { queryKey: ["messages"] },
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === message.id ? { ...m, isPinned: message.isPinned } : m,
+          );
+        },
+      );
       toast.success(message.isPinned ? "Message pinned" : "Message unpinned");
     },
     onError: (error: any) => {
@@ -403,7 +442,9 @@ export const useRemoveParticipant = () => {
       queryClient.invalidateQueries({ queryKey: ["chats"] });
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || "Failed to remove participant");
+      toast.error(
+        error.response?.data?.message || "Failed to remove participant",
+      );
     },
   });
 };
@@ -413,25 +454,36 @@ export const useRemoveParticipant = () => {
 export const useAddReaction = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ messageId, emoji }: { messageId: string; emoji: string }) => {
+    mutationFn: async ({
+      messageId,
+      emoji,
+    }: {
+      messageId: string;
+      emoji: string;
+    }) => {
       const response = await chatApi.addReaction(messageId, emoji);
       return response.data;
     },
     onSuccess: (reaction) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) =>
-          m.id === reaction.messageId
-            ? {
-                ...m,
-                reactions: [
-                  ...m.reactions.filter((r: any) => r.userId !== reaction.userId),
-                  reaction,
-                ],
-              }
-            : m
-        );
-      });
+      queryClient.setQueriesData<Message[]>(
+        { queryKey: ["messages"] },
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === reaction.messageId
+              ? {
+                  ...m,
+                  reactions: [
+                    ...m.reactions.filter(
+                      (r: any) => r.userId !== reaction.userId,
+                    ),
+                    reaction,
+                  ],
+                }
+              : m,
+          );
+        },
+      );
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to add reaction");
@@ -442,21 +494,30 @@ export const useAddReaction = () => {
 export const useRemoveReaction = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ messageId, emoji }: { messageId: string; emoji: string }) => {
+    mutationFn: async ({
+      messageId,
+      emoji,
+    }: {
+      messageId: string;
+      emoji: string;
+    }) => {
       await chatApi.removeReaction(messageId, emoji);
     },
     onSuccess: (_, { messageId, emoji }) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) =>
-          m.id === messageId
-            ? {
-                ...m,
-                reactions: m.reactions.filter((r: any) => r.emoji !== emoji),
-              }
-            : m
-        );
-      });
+      queryClient.setQueriesData<Message[]>(
+        { queryKey: ["messages"] },
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === messageId
+              ? {
+                  ...m,
+                  reactions: m.reactions.filter((r: any) => r.emoji !== emoji),
+                }
+              : m,
+          );
+        },
+      );
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to remove reaction");
@@ -467,7 +528,13 @@ export const useRemoveReaction = () => {
 export const useMarkRead = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ chatId, messageId }: { chatId: string; messageId: string }) => {
+    mutationFn: async ({
+      chatId,
+      messageId,
+    }: {
+      chatId: string;
+      messageId: string;
+    }) => {
       const response = await chatApi.markRead(chatId, messageId);
       return response.data;
     },
@@ -491,15 +558,18 @@ export const useSearchMessages = (chatId: string, query: string) => {
 
 // ============ WEBSOCKET HOOK ============
 
+// ✅ FIX: Get the correct server URL from environment
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "http://localhost:3001"; // ⚠️ Use your NestJS server port!
+
 export const useChatSocket = (
-  chatId: string | null, 
+  chatId: string | null,
   userId: string,
   options?: {
     onNewMessage?: (message: Message) => void;
     onMessageDeleted?: (data: { messageId: string; userId: string }) => void;
     onMessageEdited?: (message: Message) => void;
     onReaction?: (reaction: Reaction) => void;
-  }
+  },
 ) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
@@ -508,57 +578,135 @@ export const useChatSocket = (
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const queryClient = useQueryClient();
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  // Get token from storage
+  const getToken = useCallback(() => {
+    // Try multiple sources for the token
+    const token =
+      localStorage.getItem("accessToken") ||
+      localStorage.getItem("token") ||
+      sessionStorage.getItem("accessToken") ||
+      document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("accessToken="))
+        ?.split("=")[1];
+
+    return token;
+  }, []);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      console.log("⏳ Waiting for userId to connect socket");
+      return;
+    }
 
-    const s = io("http://localhost:3000/chat", {
+    const token = getToken();
+    if (!token) {
+      console.warn("⚠️ No token found, socket connection may fail");
+      // Try to connect anyway - the server will handle it
+    }
+
+    console.log(`🔌 Connecting to socket server at: ${SOCKET_URL}/chat`);
+    console.log(`👤 User ID: ${userId}`);
+    console.log(`🔑 Token present: ${!!token}`);
+
+    // ✅ FIX: Use the correct namespace and port
+    const s = io(`${SOCKET_URL}/chat`, {
       withCredentials: true,
-      transports: ["websocket"],
+      transports: ["websocket", "polling"], // Fallback to polling if websocket fails
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      timeout: 20000,
+      auth: {
+        token: token,
+      },
+      query: {
+        userId: userId,
+      },
     });
 
+    // --- Connection Events ---
     s.on("connect", () => {
       console.log("✅ Connected to chat socket");
       setIsConnected(true);
       setReconnectAttempts(0);
+
+      // Join the chat room if we have a chatId
       if (chatId) {
+        console.log(`📚 Joining chat room: ${chatId}`);
         s.emit("chat:join", { chatId });
       }
     });
 
     s.on("disconnect", (reason) => {
-      console.log("❌ Disconnected from chat socket:", reason);
+      console.log(`❌ Disconnected from chat socket: ${reason}`);
       setIsConnected(false);
+
+      // Server initiated disconnect - attempt to reconnect
       if (reason === "io server disconnect") {
-        // Server initiated disconnect, try to reconnect
-        s.connect();
+        console.log("🔄 Server disconnected, attempting to reconnect...");
+        setTimeout(() => {
+          if (s.disconnected) {
+            s.connect();
+          }
+        }, 1000);
       }
     });
 
     s.on("connect_error", (err) => {
-      console.error("Chat socket connection error:", err);
+      console.error("❌ Chat socket connection error:", err);
+      setIsConnected(false);
       setReconnectAttempts((prev) => prev + 1);
+
+      // Show error after multiple attempts
       if (reconnectAttempts >= 5) {
-        toast.error("Failed to connect to chat server after multiple attempts");
+        toast.error(
+          "Failed to connect to chat server. Please refresh the page.",
+        );
       }
+    });
+
+    s.on("reconnect", (attemptNumber) => {
+      console.log(`🔄 Reconnected after ${attemptNumber} attempts`);
+      setIsConnected(true);
+      setReconnectAttempts(0);
+
+      // Rejoin the chat room
+      if (chatId) {
+        s.emit("chat:join", { chatId });
+      }
+    });
+
+    s.on("reconnect_failed", () => {
+      console.error("❌ All reconnection attempts failed");
+      toast.error(
+        "Unable to connect to chat server. Please check your connection.",
+      );
+    });
+
+    // ✅ FIX: Connection established event
+    s.on("connection:established", (data) => {
+      console.log("✅ Connection established:", data);
+      setIsConnected(true);
     });
 
     // ---------- Message Events ----------
     s.on("message:new", (message: Message) => {
       console.log("📩 New message received:", message);
-      
+
       if (options?.onNewMessage) {
         options.onNewMessage(message);
       }
 
-      const queryKey = message.chatId 
-        ? ["messages", message.chatId] 
-        : message.communityId 
-          ? ["community-messages", message.communityId] 
+      const queryKey = message.chatId
+        ? ["messages", message.chatId]
+        : message.communityId
+          ? ["community-messages", message.communityId]
           : null;
 
       if (queryKey) {
@@ -571,121 +719,175 @@ export const useChatSocket = (
       queryClient.invalidateQueries({ queryKey: ["chats"] });
     });
 
-    s.on("message:deleted", (data: { messageId: string; userId: string; chatId?: string; communityId?: string }) => {
-      if (options?.onMessageDeleted) {
-        options.onMessageDeleted(data);
-      }
-
-      const queryKey = data.chatId 
-        ? ["messages", data.chatId] 
-        : data.communityId 
-          ? ["community-messages", data.communityId] 
-          : null;
-
-      if (queryKey) {
-        queryClient.setQueryData<Message[]>(queryKey, (old) => {
-          if (!old) return old;
-          return old.map((m) =>
-            m.id === data.messageId ? { ...m, isDeleted: true, content: "Message deleted" } : m
-          );
-        });
-      }
+    s.on("message:sent", (message: Message) => {
+      console.log("✅ Message sent confirmation:", message);
+      // Optional: show success or update UI
     });
 
+    s.on(
+      "message:deleted",
+      (data: {
+        messageId: string;
+        userId: string;
+        chatId?: string;
+        communityId?: string;
+      }) => {
+        console.log("🗑️ Message deleted:", data);
+
+        if (options?.onMessageDeleted) {
+          options.onMessageDeleted(data);
+        }
+
+        const queryKey = data.chatId
+          ? ["messages", data.chatId]
+          : data.communityId
+            ? ["community-messages", data.communityId]
+            : null;
+
+        if (queryKey) {
+          queryClient.setQueryData<Message[]>(queryKey, (old) => {
+            if (!old) return old;
+            return old.map((m) =>
+              m.id === data.messageId
+                ? { ...m, isDeleted: true, content: "Message deleted" }
+                : m,
+            );
+          });
+        }
+      },
+    );
+
     s.on("message:edited", (message: Message) => {
+      console.log("✏️ Message edited:", message);
+
       if (options?.onMessageEdited) {
         options.onMessageEdited(message);
       }
 
-      const queryKey = message.chatId 
-        ? ["messages", message.chatId] 
-        : message.communityId 
-          ? ["community-messages", message.communityId] 
+      const queryKey = message.chatId
+        ? ["messages", message.chatId]
+        : message.communityId
+          ? ["community-messages", message.communityId]
           : null;
 
       if (queryKey) {
         queryClient.setQueryData<Message[]>(queryKey, (old) => {
           if (!old) return old;
           return old.map((m) =>
-            m.id === message.id ? { ...m, content: message.content, isEdited: true } : m
+            m.id === message.id
+              ? { ...m, content: message.content, isEdited: true }
+              : m,
           );
         });
       }
     });
 
-    s.on("message:pinned", (data: { messageId: string; pinned: boolean; userId: string }) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) =>
-          m.id === data.messageId ? { ...m, isPinned: data.pinned } : m
+    s.on(
+      "message:pinned",
+      (data: { messageId: string; pinned: boolean; userId: string }) => {
+        console.log("📌 Message pinned:", data);
+        queryClient.setQueriesData<Message[]>(
+          { queryKey: ["messages"] },
+          (old) => {
+            if (!old) return old;
+            return old.map((m) =>
+              m.id === data.messageId ? { ...m, isPinned: data.pinned } : m,
+            );
+          },
         );
-      });
-    });
+      },
+    );
 
     // ---------- Reaction Events ----------
     s.on("reaction:new", (reaction: Reaction) => {
+      console.log("❤️ New reaction:", reaction);
+
       if (options?.onReaction) {
         options.onReaction(reaction);
       }
 
       if (!reaction?.messageId) return;
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) =>
-          m.id === reaction.messageId
-            ? {
-                ...m,
-                reactions: [
-                  ...m.reactions.filter((r: any) => r.userId !== reaction.userId),
-                  reaction,
-                ],
-              }
-            : m
-        );
-      });
+      queryClient.setQueriesData<Message[]>(
+        { queryKey: ["messages"] },
+        (old) => {
+          if (!old) return old;
+          return old.map((m) =>
+            m.id === reaction.messageId
+              ? {
+                  ...m,
+                  reactions: [
+                    ...m.reactions.filter(
+                      (r: any) => r.userId !== reaction.userId,
+                    ),
+                    reaction,
+                  ],
+                }
+              : m,
+          );
+        },
+      );
     });
 
-    s.on("reaction:removed", (data: { messageId: string; userId: string; emoji: string }) => {
-      queryClient.setQueriesData<Message[]>({ queryKey: ["messages"] }, (old) => {
-        if (!old) return old;
-        return old.map((m) =>
-          m.id === data.messageId
-            ? {
-                ...m,
-                reactions: m.reactions.filter((r: any) => r.emoji !== data.emoji || r.userId !== data.userId),
-              }
-            : m
+    s.on(
+      "reaction:removed",
+      (data: { messageId: string; userId: string; emoji: string }) => {
+        console.log("💔 Reaction removed:", data);
+        queryClient.setQueriesData<Message[]>(
+          { queryKey: ["messages"] },
+          (old) => {
+            if (!old) return old;
+            return old.map((m) =>
+              m.id === data.messageId
+                ? {
+                    ...m,
+                    reactions: m.reactions.filter(
+                      (r: any) =>
+                        r.emoji !== data.emoji || r.userId !== data.userId,
+                    ),
+                  }
+                : m,
+            );
+          },
         );
-      });
-    });
+      },
+    );
 
     s.on("reaction:error", (data: { error: string }) => {
       toast.error(data.error || "Failed to add reaction");
     });
 
     // ---------- Read Receipts ----------
-    s.on("message:read", (data: { userId: string; messageId: string; chatId: string }) => {
-      console.log("Message read:", data);
-    });
+    s.on(
+      "message:read",
+      (data: { userId: string; messageId: string; chatId: string }) => {
+        console.log("👀 Message read:", data);
+      },
+    );
 
     // ---------- Typing Events ----------
-    s.on("typing:start", (data: { userId: string; chatId: string; communityId?: string }) => {
-      const targetId = data.chatId || data.communityId;
-      if (targetId === chatId && data.userId !== userId) {
-        setTypingUsers((prev) => new Set(prev).add(data.userId));
-      }
-    });
+    s.on(
+      "typing:start",
+      (data: { userId: string; chatId: string; communityId?: string }) => {
+        const targetId = data.chatId || data.communityId;
+        if (targetId === chatId && data.userId !== userId) {
+          setTypingUsers((prev) => new Set(prev).add(data.userId));
+        }
+      },
+    );
 
-    s.on("typing:stop", (data: { userId: string; chatId: string; communityId?: string }) => {
-      const targetId = data.chatId || data.communityId;
-      if (targetId === chatId) {
-        setTypingUsers((prev) => {
-          const next = new Set(prev);
-          next.delete(data.userId);
-          return next;
-        });
-      }
-    });
+    s.on(
+      "typing:stop",
+      (data: { userId: string; chatId: string; communityId?: string }) => {
+        const targetId = data.chatId || data.communityId;
+        if (targetId === chatId) {
+          setTypingUsers((prev) => {
+            const next = new Set(prev);
+            next.delete(data.userId);
+            return next;
+          });
+        }
+      },
+    );
 
     // ---------- Presence Events ----------
     s.on("user:online", (data: { userId: string }) => {
@@ -700,41 +902,63 @@ export const useChatSocket = (
       });
     });
 
+    s.on("users:online", (data: { users: string[] }) => {
+      setOnlineUsers(new Set(data.users));
+    });
+
     // ---------- Message Errors ----------
     s.on("message:error", (data: { error: string }) => {
       toast.error(data.error || "Message failed to send");
     });
 
+    s.on("error", (data: { message: string }) => {
+      console.error("Socket error:", data);
+      toast.error(data.message || "Socket error occurred");
+    });
+
     setSocket(s);
 
     return () => {
-      // Clear typing timeout
+      // Clear all timeouts
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
-      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      // Leave chat room
       if (chatId && s.connected) {
         s.emit("chat:leave", { chatId });
       }
+
+      // Disconnect
       s.disconnect();
       setSocket(null);
+      setIsConnected(false);
     };
-  }, [chatId, userId, queryClient, options, reconnectAttempts]);
+  }, [chatId, userId, queryClient, options, reconnectAttempts, getToken]);
 
   // ---------- Socket Actions ----------
   const sendMessage = useCallback(
-    (payload: Omit<SendMessagePayload, "chatId" | "communityId"> & { chatId?: string; communityId?: string }) => {
+    (
+      payload: Omit<SendMessagePayload, "chatId" | "communityId"> & {
+        chatId?: string;
+        communityId?: string;
+      },
+    ) => {
       if (!socket || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      
+
       const finalPayload = {
         ...payload,
         chatId: payload.chatId || chatId || undefined,
       };
-      
+
       console.log("📤 Sending message via socket:", finalPayload);
       socket.emit("message:send", finalPayload);
     },
@@ -742,17 +966,22 @@ export const useChatSocket = (
   );
 
   const sendVoiceMessage = useCallback(
-    (payload: { chatId?: string; communityId?: string; audioUrl: string; duration: number }) => {
+    (payload: {
+      chatId?: string;
+      communityId?: string;
+      audioUrl: string;
+      duration: number;
+    }) => {
       if (!socket || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      
+
       const finalPayload = {
         ...payload,
         chatId: payload.chatId || chatId || undefined,
       };
-      
+
       socket.emit("voice:message:send", finalPayload);
     },
     [socket, isConnected, chatId],
@@ -761,20 +990,20 @@ export const useChatSocket = (
   const sendTyping = useCallback(
     (isTyping: boolean, targetId?: string, isCommunity: boolean = false) => {
       if (!socket || !isConnected) return;
-      
+
       const id = targetId || chatId;
       if (!id) return;
-      
+
       const event = isTyping ? "typing:start" : "typing:stop";
       const payload = isCommunity ? { communityId: id } : { chatId: id };
-      
+
       socket.emit(event, payload);
 
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
-      
+
       if (isTyping) {
         typingTimeoutRef.current = setTimeout(() => {
           if (socket && isConnected) {
@@ -789,14 +1018,14 @@ export const useChatSocket = (
   const emitRead = useCallback(
     (messageId: string, targetId?: string, isCommunity: boolean = false) => {
       if (!socket || !isConnected) return;
-      
+
       const id = targetId || chatId;
       if (!id) return;
-      
-      const payload = isCommunity 
-        ? { communityId: id, messageId } 
+
+      const payload = isCommunity
+        ? { communityId: id, messageId }
         : { chatId: id, messageId };
-      
+
       socket.emit("message:read", payload);
     },
     [socket, isConnected, chatId],
@@ -836,7 +1065,12 @@ export const useChatSocket = (
   );
 
   const fetchMessages = useCallback(
-    (params: { chatId?: string; communityId?: string; limit?: number; before?: string }) => {
+    (params: {
+      chatId?: string;
+      communityId?: string;
+      limit?: number;
+      before?: string;
+    }) => {
       if (!socket || !isConnected) {
         toast.error("Not connected to chat server");
         return;
@@ -897,17 +1131,17 @@ export const useVoiceMessageRecorder = () => {
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-        } 
+        },
       });
       streamRef.current = stream;
-      
+
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
+        mimeType: "audio/webm;codecs=opus",
       });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
@@ -919,11 +1153,11 @@ export const useVoiceMessageRecorder = () => {
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         setAudioBlob(blob);
         chunksRef.current = [];
         if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
         }
       };
@@ -933,11 +1167,11 @@ export const useVoiceMessageRecorder = () => {
       setDuration(0);
 
       timerRef.current = setInterval(() => {
-        setDuration(prev => prev + 1);
+        setDuration((prev) => prev + 1);
       }, 1000);
     } catch (error) {
-      console.error('Failed to start recording:', error);
-      toast.error('Failed to access microphone. Please check permissions.');
+      console.error("Failed to start recording:", error);
+      toast.error("Failed to access microphone. Please check permissions.");
       throw error;
     }
   };
@@ -949,7 +1183,7 @@ export const useVoiceMessageRecorder = () => {
         return;
       }
 
-      if (mediaRecorderRef.current.state === 'recording') {
+      if (mediaRecorderRef.current.state === "recording") {
         mediaRecorderRef.current.stop();
       }
 
@@ -976,7 +1210,10 @@ export const useVoiceMessageRecorder = () => {
   }, [audioBlob]);
 
   const cancelRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state === "recording"
+    ) {
       mediaRecorderRef.current.stop();
     }
     if (timerRef.current) {
@@ -984,7 +1221,7 @@ export const useVoiceMessageRecorder = () => {
       timerRef.current = null;
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     setIsRecording(false);
@@ -1001,21 +1238,24 @@ export const useVoiceMessageRecorder = () => {
         timerRef.current = null;
       }
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
       }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state === "recording"
+      ) {
         mediaRecorderRef.current.stop();
       }
     };
   }, []);
 
-  return { 
-    isRecording, 
-    duration, 
-    audioBlob, 
-    startRecording, 
-    stopRecording, 
-    cancelRecording 
+  return {
+    isRecording,
+    duration,
+    audioBlob,
+    startRecording,
+    stopRecording,
+    cancelRecording,
   };
 };

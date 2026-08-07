@@ -18,8 +18,13 @@ import { PrismaService } from '../prisma.service';
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   },
-  namespace: 'chat',
+  namespace: 'chat', // <-- IMPORTANT: This is the namespace
+  transports: ['websocket', 'polling'], // <-- Add both transports
+  pingTimeout: 60000,
+  pingInterval: 25000,
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -27,7 +32,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(ChatGateway.name);
   private userSockets: Map<string, string[]> = new Map();
-  private typingUsers: Map<string, Set<string>> = new Map(); // roomId -> Set of userIds
+  private typingUsers: Map<string, Set<string>> = new Map();
+  private readonly CONNECTION_TIMEOUT = 30000;
+  private connectionAttempts: Map<string, number> = new Map();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -37,73 +44,129 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(client: Socket) {
     try {
+      this.logger.log(`🟡 New connection attempt: ${client.id}`);
+      
+      // Set connection timeout
+      const timeout = setTimeout(() => {
+        if (!client.data.userId) {
+          this.logger.warn(`⏱️ Connection timeout for ${client.id}`);
+          client.disconnect();
+        }
+      }, this.CONNECTION_TIMEOUT);
+
       const cookieHeader = client.handshake.headers.cookie;
+      this.logger.log(`📡 Cookie header present: ${!!cookieHeader}`);
 
       if (!cookieHeader) {
-        this.logger.warn('No cookie header, disconnecting');
+        this.logger.warn('❌ No cookie header, disconnecting');
+        clearTimeout(timeout);
+        client.emit('error', { message: 'No cookie header provided' });
         client.disconnect();
         return;
       }
 
-      const cookies = parseCookie(String(cookieHeader)) as Record<
-        string,
-        string
-      >;
-      const token = cookies['accessToken'];
+      const cookies = parseCookie(String(cookieHeader)) as Record<string, string>;
+      const token = cookies['accessToken'] || client.handshake.auth?.token;
+
+      this.logger.log(`🔑 Token present: ${!!token}`);
 
       if (!token) {
-        this.logger.warn('No access token, disconnecting');
+        this.logger.warn('❌ No access token, disconnecting');
+        clearTimeout(timeout);
+        client.emit('error', { message: 'No access token provided' });
         client.disconnect();
         return;
       }
 
-      const payload = this.jwtService.verify(token, {
-        secret: process.env.JWT_SECRET,
-      });
+      try {
+        const payload = this.jwtService.verify(token, {
+          secret: process.env.JWT_SECRET,
+        });
+        const userId = payload.sub || payload.userId;
 
-      const userId = payload.sub;
-      client.data.userId = userId;
+        if (!userId) {
+          throw new Error('No user ID in token');
+        }
 
-      // Store socket
-      const sockets = this.userSockets.get(userId) || [];
-      sockets.push(client.id);
-      this.userSockets.set(userId, sockets);
+        client.data.userId = userId;
+        client.data.token = token;
+        clearTimeout(timeout);
 
-      // Join all chat rooms the user is part of
-      const chats = await this.prisma.chat.findMany({
-        where: {
-          participants: {
-            some: { userId },
-          },
-        },
-        select: { id: true },
-      });
+        this.logger.log(`✅ User ${userId} authenticated via socket ${client.id}`);
 
-      for (const chat of chats) {
-        await client.join(`chat:${chat.id}`);
-        client.to(`chat:${chat.id}`).emit('user:online', { userId });
+        // Store socket
+        const sockets = this.userSockets.get(userId) || [];
+        sockets.push(client.id);
+        this.userSockets.set(userId, sockets);
+
+        // Send connection confirmation
+        client.emit('connection:established', {
+          userId,
+          socketId: client.id,
+          message: 'Connected to chat server',
+        });
+
+        // Join all chat rooms the user is part of
+        try {
+          const chats = await this.prisma.chat.findMany({
+            where: {
+              participants: {
+                some: { userId },
+              },
+            },
+            select: { id: true },
+          });
+
+          for (const chat of chats) {
+            const roomId = `chat:${chat.id}`;
+            await client.join(roomId);
+            this.logger.log(`📚 User ${userId} joined room ${roomId}`);
+            // Notify others in the room
+            client.to(roomId).emit('user:online', { userId });
+          }
+
+          // Join all community rooms
+          const communities = await this.prisma.communityMember.findMany({
+            where: { userId },
+            select: { communityId: true },
+          });
+
+          for (const member of communities) {
+            const roomId = `community:${member.communityId}`;
+            await client.join(roomId);
+            this.logger.log(`📚 User ${userId} joined community ${roomId}`);
+            client.to(roomId).emit('user:online', { userId });
+          }
+
+          this.logger.log(`✅ User ${userId} fully connected with ${chats.length + communities.length} rooms`);
+          
+          // Send initial online users list
+          const onlineUsers = Array.from(this.userSockets.keys());
+          client.emit('users:online', { users: onlineUsers });
+
+        } catch (dbError) {
+          this.logger.error('Database error during connection:', dbError);
+          client.emit('error', { message: 'Failed to load chat rooms' });
+        }
+
+      } catch (jwtError) {
+        this.logger.error('❌ JWT verification failed:', jwtError);
+        clearTimeout(timeout);
+        client.emit('error', { message: 'Invalid token' });
+        client.disconnect();
+        return;
       }
 
-      // Join all community rooms the user is part of
-      const communities = await this.prisma.communityMember.findMany({
-        where: { userId },
-        select: { communityId: true },
-      });
-
-      for (const member of communities) {
-        await client.join(`community:${member.communityId}`);
-        client.to(`community:${member.communityId}`).emit('user:online', { userId });
-      }
-
-      this.logger.log(`✅ User ${userId} connected via socket ${client.id}`);
     } catch (error) {
-      this.logger.error('WebSocket connection error:', error);
+      this.logger.error('❌ WebSocket connection error:', error);
+      client.emit('error', { message: 'Connection failed' });
       client.disconnect();
     }
   }
 
   async handleDisconnect(client: Socket) {
     const userId = client.data.userId;
+    this.logger.log(`🔴 Client ${client.id} disconnected (User: ${userId || 'unknown'})`);
 
     if (userId) {
       // Remove from typing users
@@ -113,7 +176,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           if (users.size === 0) {
             this.typingUsers.delete(roomId);
           }
-          // Notify room that user stopped typing
           this.server.to(roomId).emit('typing:stop', {
             userId,
             chatId: roomId.startsWith('chat:') ? roomId.replace('chat:', '') : undefined,
@@ -131,25 +193,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         if (sockets.length === 0) {
           this.userSockets.delete(userId);
+          this.logger.log(`👤 User ${userId} is now offline`);
 
           // Notify chat rooms
-          const chats = await this.prisma.chat.findMany({
-            where: { participants: { some: { userId } } },
-            select: { id: true },
-          });
-          for (const chat of chats) {
-            client.to(`chat:${chat.id}`).emit('user:offline', { userId });
-          }
+          try {
+            const chats = await this.prisma.chat.findMany({
+              where: { participants: { some: { userId } } },
+              select: { id: true },
+            });
+            for (const chat of chats) {
+              client.to(`chat:${chat.id}`).emit('user:offline', { userId });
+            }
 
-          // Notify community rooms
-          const communities = await this.prisma.communityMember.findMany({
-            where: { userId },
-            select: { communityId: true },
-          });
-          for (const member of communities) {
-            client
-              .to(`community:${member.communityId}`)
-              .emit('user:offline', { userId });
+            const communities = await this.prisma.communityMember.findMany({
+              where: { userId },
+              select: { communityId: true },
+            });
+            for (const member of communities) {
+              client.to(`community:${member.communityId}`).emit('user:offline', { userId });
+            }
+          } catch (error) {
+            this.logger.error('Error notifying offline status:', error);
           }
         } else {
           this.userSockets.set(userId, sockets);
@@ -157,7 +221,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     }
 
-    this.logger.log(`Client ${client.id} disconnected`);
+    // Clear any connection attempts
+    this.connectionAttempts.delete(client.id);
   }
 
   // ==========================
@@ -187,6 +252,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await client.join(`chat:${data.chatId}`);
       this.logger.log(`User ${userId} joined chat ${data.chatId}`);
       client.emit('chat:joined', { chatId: data.chatId });
+      
+      // Notify others
+      client.to(`chat:${data.chatId}`).emit('user:online', { userId });
     } catch (error) {
       this.logger.error('Error joining chat:', error);
       client.emit('error', { message: 'Failed to join chat' });
@@ -202,6 +270,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await client.leave(`chat:${data.chatId}`);
     this.logger.log(`User ${client.data.userId} left chat ${data.chatId}`);
     client.emit('chat:left', { chatId: data.chatId });
+    client.to(`chat:${data.chatId}`).emit('user:offline', { 
+      userId: client.data.userId 
+    });
   }
 
   @SubscribeMessage('community:join')
@@ -241,10 +312,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     if (!data?.communityId) return;
     await client.leave(`community:${data.communityId}`);
-    this.logger.log(
-      `User ${client.data.userId} left community ${data.communityId}`,
-    );
+    this.logger.log(`User ${client.data.userId} left community ${data.communityId}`);
     client.emit('community:left', { communityId: data.communityId });
+    client.to(`community:${data.communityId}`).emit('user:offline', { 
+      userId: client.data.userId 
+    });
   }
 
   // ==========================
@@ -306,7 +378,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Broadcast to all participants in the room
         this.server.to(roomId).emit('message:new', message);
         
-        // Also send confirmation back to sender (so they don't need to rely on the broadcast)
+        // Also send confirmation back to sender
         client.emit('message:sent', message);
         
         this.logger.log(`📤 Message sent to ${roomId} by user ${userId}`);
@@ -596,7 +668,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data.emoji,
       );
 
-      // Find which room this message belongs to
       const message = await this.prisma.message.findUnique({
         where: { id: data.messageId },
         select: { chatId: true, communityId: true },
@@ -691,7 +762,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       let messages;
       if (data.chatId) {
-        // Verify user is a participant
         const participant = await this.prisma.chatParticipant.findUnique({
           where: { chatId_userId: { chatId: data.chatId, userId } },
         });
@@ -706,7 +776,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           before: data.before,
         });
       } else if (data.communityId) {
-        // Verify user is a member
         const member = await this.prisma.communityMember.findUnique({
           where: { communityId_userId: { communityId: data.communityId, userId } },
         });
@@ -783,5 +852,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         error: error.message || 'Failed to pin message',
       });
     }
+  }
+
+  // ==========================
+  // ONLINE USERS
+  // ==========================
+
+  @SubscribeMessage('users:getOnline')
+  handleGetOnlineUsers(@ConnectedSocket() client: Socket) {
+    const onlineUsers = Array.from(this.userSockets.keys());
+    client.emit('users:online', { users: onlineUsers });
   }
 }

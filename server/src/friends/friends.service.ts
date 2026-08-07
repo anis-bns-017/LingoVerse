@@ -1,6 +1,15 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { SendFriendRequestDto, RespondFriendRequestDto, BlockUserDto } from './dto/friend-request.dto';
+import {
+  SendFriendRequestDto,
+  RespondFriendRequestDto,
+  BlockUserDto,
+} from './dto/friend-request.dto';
 
 @Injectable()
 export class FriendsService {
@@ -61,7 +70,9 @@ export class FriendsService {
       },
     });
     if (blocked) {
-      throw new BadRequestException('You cannot send a friend request to this user');
+      throw new BadRequestException(
+        'You cannot send a friend request to this user',
+      );
     }
 
     return this.prisma.friendRequest.create({
@@ -85,11 +96,15 @@ export class FriendsService {
     }
 
     if (request.toUserId !== userId) {
-      throw new BadRequestException('You are not the recipient of this request');
+      throw new BadRequestException(
+        'You are not the recipient of this request',
+      );
     }
 
     if (request.status !== 'PENDING') {
-      throw new BadRequestException('This request has already been responded to');
+      throw new BadRequestException(
+        'This request has already been responded to',
+      );
     }
 
     if (action === 'accepted') {
@@ -134,7 +149,9 @@ export class FriendsService {
     }
 
     if (request.status !== 'PENDING') {
-      throw new BadRequestException('This request has already been responded to');
+      throw new BadRequestException(
+        'This request has already been responded to',
+      );
     }
 
     await this.prisma.friendRequest.delete({
@@ -149,10 +166,7 @@ export class FriendsService {
   async getFriends(userId: string) {
     const friends = await this.prisma.friend.findMany({
       where: {
-        OR: [
-          { fromUserId: userId },
-          { toUserId: userId },
-        ],
+        OR: [{ fromUserId: userId }, { toUserId: userId }],
         status: 'ACCEPTED',
       },
       include: {
@@ -191,7 +205,8 @@ export class FriendsService {
 
     // Format response: return the friend user object
     return friends.map((friend) => {
-      const friendUser = friend.fromUserId === userId ? friend.toUser : friend.fromUser;
+      const friendUser =
+        friend.fromUserId === userId ? friend.toUser : friend.fromUser;
       return {
         ...friendUser,
         friendSince: friend.createdAt,
@@ -423,7 +438,7 @@ export class FriendsService {
           isRequested: !!isRequested,
           isBlocked: !!isBlocked,
         };
-      })
+      }),
     );
 
     return results;
@@ -474,10 +489,7 @@ export class FriendsService {
   async getFriendCount(userId: string) {
     return this.prisma.friend.count({
       where: {
-        OR: [
-          { fromUserId: userId },
-          { toUserId: userId },
-        ],
+        OR: [{ fromUserId: userId }, { toUserId: userId }],
         status: 'ACCEPTED',
       },
     });

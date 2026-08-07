@@ -21,6 +21,7 @@ import { VoiceRoomPage } from "../components/voice/VoiceRoomPage";
 import { CommunitiesPage } from "../pages/CommunitiesPage";
 import { CommunityPage } from "../pages/CommunityPage";
 import { JoinCommunityPage } from "../pages/JoinCommunityPage";
+import { NewConversationPage } from "../pages/NewConversationPage";
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -174,6 +175,15 @@ export const AppRoutes = () => {
           element={
             <ProtectedRoute>
               <JoinCommunityPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/chat/new"
+          element={
+            <ProtectedRoute>
+              <NewConversationPage />
             </ProtectedRoute>
           }
         />

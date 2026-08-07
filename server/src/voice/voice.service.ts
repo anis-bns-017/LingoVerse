@@ -7,7 +7,6 @@ import {
 import { PrismaService } from '../prisma.service';
 import { LiveKitService } from './livekit.service';
 import { CreateVoiceRoomDto, UpdateVoiceRoomDto } from './dto/voice.dto';
-import { MessageType } from '@prisma/client';
 
 @Injectable()
 export class VoiceService {
@@ -19,7 +18,6 @@ export class VoiceService {
   // ============ ROOMS ============
 
   async createRoom(userId: string, dto: CreateVoiceRoomDto) {
-    // Validate max participants
     if (
       dto.maxParticipants &&
       (dto.maxParticipants < 2 || dto.maxParticipants > 100)
@@ -29,13 +27,11 @@ export class VoiceService {
       );
     }
 
-    // Create LiveKit room
     const liveKitRoomId = await this.liveKitService.createRoom(
       `${dto.name}-${Date.now()}`,
       dto.maxParticipants || 50,
     );
 
-    // Create database record
     const room = await this.prisma.voiceRoom.create({
       data: {
         name: dto.name,
@@ -49,7 +45,6 @@ export class VoiceService {
       },
     });
 
-    // Add creator as participant
     await this.prisma.voiceParticipant.create({
       data: {
         roomId: room.id,
@@ -58,7 +53,6 @@ export class VoiceService {
       },
     });
 
-    // Create stage for STAGE type rooms
     if (dto.type === 'STAGE') {
       await this.prisma.stage.create({
         data: {
@@ -77,6 +71,7 @@ export class VoiceService {
       where: { id: roomId },
       include: {
         participants: {
+          where: { leftAt: null },
           include: {
             user: {
               select: {
@@ -94,6 +89,19 @@ export class VoiceService {
             id: true,
             name: true,
             avatarUrl: true,
+          },
+        },
+        messages: {
+          take: 50,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
           },
         },
       },
@@ -162,12 +170,10 @@ export class VoiceService {
       throw new ForbiddenException('Only the creator can end this room');
     }
 
-    // End LiveKit room
     if (room.liveKitRoomId) {
       await this.liveKitService.endRoom(room.liveKitRoomId);
     }
 
-    // Update database
     return this.prisma.voiceRoom.update({
       where: { id: roomId },
       data: {
@@ -193,7 +199,6 @@ export class VoiceService {
       throw new BadRequestException('Room has ended');
     }
 
-    // Check participant limit
     if (room.participants.length >= room.maxParticipants) {
       throw new BadRequestException('Room is full');
     }
@@ -205,13 +210,11 @@ export class VoiceService {
     });
 
     if (existing) {
-      // Re-join: update leftAt to null
       await this.prisma.voiceParticipant.update({
         where: { id: existing.id },
         data: { leftAt: null, joinedAt: new Date() },
       });
 
-      // Generate new token
       if (!room.liveKitRoomId) {
         throw new BadRequestException('Room not properly initialized');
       }
@@ -224,7 +227,6 @@ export class VoiceService {
       return { token, participant: existing };
     }
 
-    // Generate LiveKit token
     if (!room.liveKitRoomId) {
       throw new BadRequestException('Room not properly initialized');
     }
@@ -234,7 +236,6 @@ export class VoiceService {
       userId,
     );
 
-    // Add to database
     const participant = await this.prisma.voiceParticipant.create({
       data: {
         roomId,
@@ -272,7 +273,6 @@ export class VoiceService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    // Check permissions
     const isCreator = room.creatorId === userId;
     const isModerator = room.participants.some(
       (p) => p.userId === userId && p.role === 'MODERATOR',
@@ -290,7 +290,6 @@ export class VoiceService {
     });
     if (!participant) throw new NotFoundException('Participant not found');
 
-    // Prevent demoting creator
     if (targetUserId === room.creatorId) {
       throw new ForbiddenException("Cannot change the creator's role");
     }
@@ -318,7 +317,6 @@ export class VoiceService {
       throw new BadRequestException('Not a stage room');
     }
 
-    // Check if user is creator or moderator
     const isCreator = room.creatorId === userId;
     const isModerator = room.participants.some(
       (p) => p.userId === userId && p.role === 'MODERATOR',
@@ -337,12 +335,10 @@ export class VoiceService {
       throw new BadRequestException('User already on stage');
     }
 
-    // Check max speakers (e.g., 5)
     if (speakers.length >= 5) {
       throw new BadRequestException('Stage is full');
     }
 
-    // Update participant role
     await this.prisma.voiceParticipant.update({
       where: {
         roomId_userId: { roomId, userId: targetUserId },
@@ -370,7 +366,6 @@ export class VoiceService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    // Check if user is creator or moderator
     const isCreator = room.creatorId === userId;
     const isModerator = room.participants.some(
       (p) => p.userId === userId && p.role === 'MODERATOR',
@@ -386,7 +381,6 @@ export class VoiceService {
 
     const speakers = stage.speakers.filter((id) => id !== targetUserId);
 
-    // Update participant role back to LISTENER
     await this.prisma.voiceParticipant.update({
       where: {
         roomId_userId: { roomId, userId: targetUserId },
@@ -408,7 +402,6 @@ export class VoiceService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    // Only creator can start recording
     if (room.creatorId !== userId) {
       throw new ForbiddenException('Only the creator can start recording');
     }
@@ -417,12 +410,10 @@ export class VoiceService {
       throw new BadRequestException('Recording is already in progress');
     }
 
-    // Start LiveKit recording
     if (room.liveKitRoomId) {
       await this.liveKitService.startRecording(room.liveKitRoomId);
     }
 
-    // Update database
     return this.prisma.voiceRoom.update({
       where: { id: roomId },
       data: { isRecording: true },
@@ -435,7 +426,6 @@ export class VoiceService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    // Only creator can stop recording
     if (room.creatorId !== userId) {
       throw new ForbiddenException('Only the creator can stop recording');
     }
@@ -444,12 +434,10 @@ export class VoiceService {
       throw new BadRequestException('No recording in progress');
     }
 
-    // Stop LiveKit recording
     if (room.liveKitRoomId) {
       await this.liveKitService.stopRecording(room.liveKitRoomId);
     }
 
-    // Update database
     return this.prisma.voiceRoom.update({
       where: { id: roomId },
       data: { isRecording: false },
@@ -477,7 +465,7 @@ export class VoiceService {
     });
   }
 
-  // ============ CHAT MESSAGES (FOR VOICE ROOMS) ============
+  // ============ VOICE ROOM MESSAGES (USING VOICEROOMMESSAGE) ============
 
   async getVoiceRoomMessages(
     userId: string,
@@ -485,7 +473,6 @@ export class VoiceService {
     limit: number = 50,
     before?: string,
   ) {
-    // Verify user is a participant
     const participant = await this.prisma.voiceParticipant.findUnique({
       where: {
         roomId_userId: { roomId, userId },
@@ -496,12 +483,11 @@ export class VoiceService {
     }
 
     const where: any = {
-      chatId: roomId,
-      isDeleted: false,
+      roomId: roomId,
     };
 
     if (before) {
-      const beforeMessage = await this.prisma.message.findUnique({
+      const beforeMessage = await this.prisma.voiceRoomMessage.findUnique({
         where: { id: before },
         select: { createdAt: true },
       });
@@ -510,7 +496,7 @@ export class VoiceService {
       }
     }
 
-    const messages = await this.prisma.message.findMany({
+    const messages = await this.prisma.voiceRoomMessage.findMany({
       where,
       take: limit,
       orderBy: { createdAt: 'desc' },
@@ -522,29 +508,6 @@ export class VoiceService {
             avatarUrl: true,
           },
         },
-        reactions: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                avatarUrl: true,
-              },
-            },
-          },
-        },
-        replyTo: {
-          include: {
-            sender: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-        attachments: true,
-        translations: true,
       },
     });
 
@@ -560,7 +523,6 @@ export class VoiceService {
     fileUrl?: string,
     replyToId?: string,
   ) {
-    // Verify user is a participant
     const participant = await this.prisma.voiceParticipant.findUnique({
       where: {
         roomId_userId: { roomId, userId },
@@ -570,7 +532,6 @@ export class VoiceService {
       throw new ForbiddenException('You are not a participant in this room');
     }
 
-    // Verify room exists and is active
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
     });
@@ -579,27 +540,21 @@ export class VoiceService {
       throw new BadRequestException('Room has ended');
     }
 
-    // Validate reply
     if (replyToId) {
-      const replyMessage = await this.prisma.message.findUnique({
+      const replyMessage = await this.prisma.voiceRoomMessage.findUnique({
         where: { id: replyToId },
-        select: { chatId: true },
+        select: { roomId: true },
       });
-      if (!replyMessage || replyMessage.chatId !== roomId) {
+      if (!replyMessage || replyMessage.roomId !== roomId) {
         throw new BadRequestException('Invalid reply message');
       }
     }
 
-    // Create message
-    const message = await this.prisma.message.create({
+    const message = await this.prisma.voiceRoomMessage.create({
       data: {
-        chatId: roomId,
+        roomId: roomId,
         senderId: userId,
         content,
-        type: (type as MessageType) || MessageType.TEXT,
-        mediaUrl,
-        fileUrl,
-        replyToId,
       },
       include: {
         sender: {
@@ -609,45 +564,11 @@ export class VoiceService {
             avatarUrl: true,
           },
         },
-        reactions: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                avatarUrl: true,
-              },
-            },
-          },
-        },
-        replyTo: {
-          include: {
-            sender: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-        attachments: true,
-        translations: true,
-      },
-    });
-
-    // Create read receipt for sender
-    await this.prisma.readReceipt.create({
-      data: {
-        messageId: message.id,
-        userId,
-        readAt: new Date(),
       },
     });
 
     return message;
   }
-
-  // ============ DELETE VOICE ROOM MESSAGE ============
 
   async deleteVoiceRoomMessage(
     userId: string,
@@ -659,15 +580,14 @@ export class VoiceService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    const message = await this.prisma.message.findUnique({
+    const message = await this.prisma.voiceRoomMessage.findUnique({
       where: { id: messageId },
     });
     if (!message) throw new NotFoundException('Message not found');
-    if (message.chatId !== roomId) {
+    if (message.roomId !== roomId) {
       throw new BadRequestException('Message does not belong to this room');
     }
 
-    // Check permissions
     const isCreator = room.creatorId === userId;
     const isSender = message.senderId === userId;
 
@@ -677,14 +597,59 @@ export class VoiceService {
       );
     }
 
-    return this.prisma.message.update({
+    return this.prisma.voiceRoomMessage.delete({
       where: { id: messageId },
-      data: {
-        isDeleted: true,
-        content: 'This message was deleted',
-        deletedAt: new Date(),
+    });
+  }
+
+  // ============ HOST PROMOTION ============
+
+  async promoteHost(currentUserId: string, roomId: string, newHostId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+      select: { creatorId: true },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    if (room.creatorId !== currentUserId) {
+      throw new ForbiddenException(
+        'Only the host can transfer host privileges',
+      );
+    }
+
+    const participant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: { roomId, userId: newHostId },
       },
     });
+
+    if (!participant) {
+      throw new NotFoundException('User is not in the room');
+    }
+
+    await this.prisma.voiceRoom.update({
+      where: { id: roomId },
+      data: { creatorId: newHostId },
+    });
+
+    await this.prisma.voiceParticipant.update({
+      where: {
+        roomId_userId: { roomId, userId: newHostId },
+      },
+      data: { role: 'MODERATOR' },
+    });
+
+    await this.prisma.voiceParticipant.update({
+      where: {
+        roomId_userId: { roomId, userId: currentUserId },
+      },
+      data: { role: 'LISTENER' },
+    });
+
+    return { success: true, newHostId };
   }
 
   // ============ GET ROOM PARTICIPANTS ============
@@ -695,7 +660,6 @@ export class VoiceService {
     });
     if (!room) throw new NotFoundException('Room not found');
 
-    // Verify user is a participant
     const participant = await this.prisma.voiceParticipant.findUnique({
       where: {
         roomId_userId: { roomId, userId },

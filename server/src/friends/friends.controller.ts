@@ -35,12 +35,18 @@ export class FriendsController {
   }
 
   @Put('requests/respond')
-  async respondFriendRequest(@Request() req, @Body() dto: RespondFriendRequestDto) {
+  async respondFriendRequest(
+    @Request() req,
+    @Body() dto: RespondFriendRequestDto,
+  ) {
     return this.friendsService.respondFriendRequest(req.user.id, dto);
   }
 
   @Delete('requests/:requestId')
-  async cancelFriendRequest(@Request() req, @Param('requestId') requestId: string) {
+  async cancelFriendRequest(
+    @Request() req,
+    @Param('requestId') requestId: string,
+  ) {
     return this.friendsService.cancelFriendRequest(req.user.id, requestId);
   }
 
@@ -86,9 +92,11 @@ export class FriendsController {
   // ============ SEARCH ============
 
   @Get('search')
-  async searchUsers(@Request() req, @Query() query: SearchUsersDto) {
-    const limit = query.limit ? parseInt(query.limit) : 20;
-    return this.friendsService.searchUsers(req.user.id, query.query, limit);
+  async searchUsers(@Request() req, @Query('query') query: string) {
+    if (!query || query.length < 2) {
+      return [];
+    }
+    return this.friendsService.searchUsers(req.user.id, query);
   }
 
   // ============ ONLINE STATUS ============

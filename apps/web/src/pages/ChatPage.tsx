@@ -1,14 +1,26 @@
-import React, { useState, useEffect } from 'react';
-import { useChats } from '../hooks/useChat';
-import { ChatList } from '../components/chat/ChatList';
-import { ChatWindow } from '../components/chat/ChatWindow';
-import { MessageSquare, ArrowLeft, MessagesSquare, Users, Plus, Search } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from "react";
+import { useChats } from "../hooks/useChat";
+import { ChatList } from "../components/chat/ChatList";
+import { useParams } from 'react-router-dom';
+import { ChatWindow } from "../components/chat/ChatWindow";
+import {
+  MessageSquare,
+  ArrowLeft,
+  MessagesSquare,
+  Plus,
+  Search,
+} from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
 export const ChatPage = () => {
+  const { user } = useAuth();
+  const { chatId: urlChatId } = useParams<{ chatId?: string }>(); // Move useParams here
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(
+    null,
+  );
+  const [searchQuery, setSearchQuery] = useState("");
   const { data: chats, isLoading } = useChats();
   const location = useLocation();
   const navigate = useNavigate();
@@ -16,32 +28,38 @@ export const ChatPage = () => {
   // Handle URL params for direct navigation
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const chatId = params.get('chatId');
-    const communityId = params.get('communityId');
-    
+    const chatId = params.get("chatId");
+    const communityId = params.get("communityId");
+
     if (chatId) {
       setSelectedChatId(chatId);
       setSelectedCommunityId(null);
     } else if (communityId) {
       setSelectedCommunityId(communityId);
       setSelectedChatId(null);
+    } else if (urlChatId) { // Use the URL param from useParams
+      setSelectedChatId(urlChatId);
+      setSelectedCommunityId(null);
     }
-  }, [location]);
+  }, [location, urlChatId]); // Add urlChatId to dependencies
 
-  // Filter chats based on search query
-  const filteredChats = chats?.filter(chat => {
+  // Filter chats based on search query using real auth user ID
+  const filteredChats = chats?.filter((chat) => {
     if (!searchQuery) return true;
     const searchLower = searchQuery.toLowerCase();
-    
+
     // Search by chat name
     if (chat.name?.toLowerCase().includes(searchLower)) return true;
-    
+
     // Search by participant names (for private chats)
-    if (chat.type === 'PRIVATE') {
-      const otherParticipant = chat.participants.find(p => p.userId !== 'current-user-id');
-      if (otherParticipant?.user.name.toLowerCase().includes(searchLower)) return true;
+    if (chat.type === "PRIVATE") {
+      const otherParticipant = chat.participants.find(
+        (p) => p.userId !== user?.id,
+      );
+      if (otherParticipant?.user.name.toLowerCase().includes(searchLower))
+        return true;
     }
-    
+
     return false;
   });
 
@@ -61,12 +79,11 @@ export const ChatPage = () => {
   const handleBack = () => {
     setSelectedChatId(null);
     setSelectedCommunityId(null);
-    navigate('', { replace: true });
+    navigate("", { replace: true });
   };
 
   const handleCreateNewChat = () => {
-    // Navigate to create chat page or open modal
-    navigate('/chat/new');
+    navigate("/chat/new");
   };
 
   const hasSelection = selectedChatId || selectedCommunityId;
@@ -78,11 +95,10 @@ export const ChatPage = () => {
   return (
     <div className="min-h-[calc(100vh-64px)] bg-slate-50/50 p-4 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto h-[calc(100vh-112px)] min-h-[500px] bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col md:flex-row">
-        
         {/* Sidebar Container */}
         <div
           className={`w-full md:w-80 lg:w-96 border-b md:border-b-0 md:border-r border-slate-100 bg-white flex flex-col shrink-0 ${
-            hasSelection ? 'hidden md:flex' : 'flex'
+            hasSelection ? "hidden md:flex" : "flex"
           } h-full`}
         >
           {/* Sidebar Header */}
@@ -92,9 +108,7 @@ export const ChatPage = () => {
                 <MessageSquare className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="text-lg font-bold text-slate-800">
-                  Messages
-                </h1>
+                <h1 className="text-lg font-bold text-slate-800">Messages</h1>
                 <p className="text-[11px] font-semibold text-slate-400">
                   {filteredChats?.length || 0} active conversations
                 </p>
@@ -142,9 +156,9 @@ export const ChatPage = () => {
                   )}
                 </div>
                 <p className="text-xs font-semibold text-slate-500">
-                  {searchQuery 
-                    ? 'No conversations match your search' 
-                    : 'No conversations found'}
+                  {searchQuery
+                    ? "No conversations match your search"
+                    : "No conversations found"}
                 </p>
                 {!searchQuery && (
                   <button
@@ -162,7 +176,7 @@ export const ChatPage = () => {
         {/* Chat Window Container */}
         <div
           className={`flex-1 bg-slate-50/30 flex flex-col h-full ${
-            !hasSelection ? 'hidden md:flex' : 'flex'
+            !hasSelection ? "hidden md:flex" : "flex"
           }`}
         >
           {selectedChatId ? (
@@ -198,9 +212,9 @@ export const ChatPage = () => {
 
               {/* Active Community Chat Component Container */}
               <div className="flex-1 overflow-hidden">
-                <ChatWindow 
-                  communityId={selectedCommunityId} 
-                  onBack={handleBack} 
+                <ChatWindow
+                  communityId={selectedCommunityId}
+                  onBack={handleBack}
                 />
               </div>
             </div>
@@ -215,7 +229,8 @@ export const ChatPage = () => {
                   Select a Conversation
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Choose a chat from the sidebar to view messages, practice languages, and stay connected.
+                  Choose a chat from the sidebar to view messages, practice
+                  languages, and stay connected.
                 </p>
               </div>
               <button
@@ -228,7 +243,6 @@ export const ChatPage = () => {
             </div>
           )}
         </div>
-
       </div>
     </div>
   );
@@ -238,7 +252,6 @@ export const ChatPage = () => {
 const ChatPageSkeleton = () => (
   <div className="min-h-[calc(100vh-64px)] bg-slate-50/50 p-4 sm:p-6 lg:p-8">
     <div className="max-w-7xl mx-auto h-[calc(100vh-112px)] min-h-[500px] bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex">
-      {/* Sidebar Skeleton */}
       <div className="w-full md:w-80 lg:w-96 border-r border-slate-100 bg-white p-5 space-y-4 shrink-0 animate-pulse">
         <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
           <div className="w-10 h-10 rounded-2xl bg-slate-200" />
@@ -247,10 +260,9 @@ const ChatPageSkeleton = () => (
             <div className="h-3 w-32 bg-slate-100 rounded" />
           </div>
         </div>
-        
-        {/* Search bar skeleton */}
+
         <div className="h-10 bg-slate-100 rounded-xl" />
-        
+
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="flex items-center gap-3 py-2">
             <div className="w-12 h-12 rounded-2xl bg-slate-200 shrink-0" />
@@ -262,7 +274,6 @@ const ChatPageSkeleton = () => (
         ))}
       </div>
 
-      {/* Main Window Skeleton */}
       <div className="hidden md:flex flex-1 bg-slate-50/30 items-center justify-center p-8 animate-pulse">
         <div className="space-y-3 text-center">
           <div className="w-16 h-16 rounded-3xl bg-slate-200 mx-auto" />

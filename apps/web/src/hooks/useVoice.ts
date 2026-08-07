@@ -139,6 +139,10 @@ export const voiceApi = {
     apiClient.get(`/voice/rooms/${roomId}/status`),
   getActiveParticipants: (roomId: string) =>
     apiClient.get(`/voice/rooms/${roomId}/active-participants`),
+
+  // Host Promotion
+  promoteHost: (roomId: string, userId: string) =>
+    apiClient.post(`/voice/rooms/${roomId}/promote-host/${userId}`),
 };
 
 // ---------- Query Hooks ----------
@@ -448,7 +452,27 @@ export const useDeleteVoiceMessage = () => {
   });
 };
 
-// ---------- Voice Socket Hook (FIXED) ----------
+export const usePromoteHost = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roomId, userId }: { roomId: string; userId: string }) => {
+      const response = await voiceApi.promoteHost(roomId, userId);
+      return response.data;
+    },
+    onSuccess: (_, { roomId }) => {
+      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
+      queryClient.invalidateQueries({
+        queryKey: ["voice-participants", roomId],
+      });
+      toast.success("Host transferred successfully!");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to transfer host");
+    },
+  });
+};
+
+// ---------- Voice Socket Hook ----------
 
 export const useVoiceSocket = (roomId: string, userId: string) => {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -610,9 +634,9 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
     setSocket(s);
 
     return () => {
-      if (socket) {
-        socket.emit("voice:leave", { roomId });
-        socket.disconnect();
+      if (s && s.connected) {
+        s.emit("voice:leave", { roomId });
+        s.disconnect();
       }
     };
   }, [roomId, userId, queryClient]);
@@ -708,6 +732,18 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
     [socket, isConnected, roomId],
   );
 
+  // ✅ NEW: Promote Host function
+  const promoteHost = useCallback(
+    (userIdToPromote: string) => {
+      if (!socket || !isConnected) {
+        toast.error("Not connected to voice server");
+        return;
+      }
+      socket.emit("voice:promote-host", { roomId, userId: userIdToPromote });
+    },
+    [socket, isConnected, roomId],
+  );
+
   const pinMessage = useCallback(
     (messageId: string, pinned: boolean) => {
       if (!socket || !isConnected) {
@@ -764,199 +800,78 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
     deleteMessage,
     muteSelf,
     fetchMessages,
+    promoteHost, // ✅ NEW
   };
 };
 
-// ---------- LiveKit Room Hook (FIXED) ----------
+// ---------- LiveKit Room Hook ----------
 
 export const useLiveKitRoom = (
   roomName: string,
   token: string | null,
-  onParticipantJoined?: (identity: string) => void,
-  onParticipantLeft?: (identity: string) => void,
+  options?: { onTrackSubscribed?: (track: any) => void },
 ) => {
   const [room, setRoom] = useState<Room | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [participants, setParticipants] = useState<any[]>([]);
-  const [remoteTracks, setRemoteTracks] = useState<Record<string, any>>({});
-  const [isMuted, setIsMuted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [localTrack, setLocalTrack] = useState<LocalAudioTrack | null>(null);
-  const [isMockMode, setIsMockMode] = useState(false);
-
-  const toggleMute = useCallback(async () => {
-    if (isMockMode) {
-      setIsMuted(!isMuted);
-      return;
-    }
-    if (!room) return;
-    try {
-      const newMuteState = !isMuted;
-      if (localTrack) {
-        await localTrack.setEnabled(!newMuteState);
-      } else {
-        const track = await room.localParticipant.setMicrophoneEnabled(!newMuteState);
-        setLocalTrack(track);
-      }
-      setIsMuted(newMuteState);
-      room.localParticipant.setMetadata(JSON.stringify({ muted: newMuteState }));
-    } catch (err) {
-      console.error('Failed to toggle mute:', err);
-      setError('Failed to toggle microphone');
-    }
-  }, [room, isMuted, localTrack, isMockMode]);
+  const [remoteTracks, setRemoteTracks] = useState<RemoteAudioTrack[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    // Check if we should use mock mode
-    const useMock = !import.meta.env.VITE_LIVEKIT_HOST || 
-                    import.meta.env.VITE_LIVEKIT_HOST === 'mock' ||
-                    import.meta.env.NODE_ENV === 'development';
-    
     if (!token || !roomName) return;
 
-    // MOCK MODE - for development without LiveKit
-    if (useMock) {
-      console.log('🔇 Using MOCK LiveKit mode (no real audio)');
-      setIsMockMode(true);
+    if (token.startsWith("mock-")) {
+      console.log("🔇 Mock mode – skipping LiveKit connection");
       setIsConnected(true);
-      setError(null);
-      
-      // Simulate participants
-      const mockParticipants = [
-        { identity: 'mock-user-1', name: 'Test User 1', metadata: '{"muted":false}' },
-        { identity: 'mock-user-2', name: 'Test User 2', metadata: '{"muted":false}' },
-      ];
-      setParticipants(mockParticipants);
-      
-      // Simulate remote tracks
-      setRemoteTracks({
-        'mock-user-1': { kind: 'audio', isMock: true },
-        'mock-user-2': { kind: 'audio', isMock: true },
-      });
-      
-      // Simulate participant join/leave after delay
-      const timer = setTimeout(() => {
-        if (onParticipantJoined) {
-          onParticipantJoined('mock-user-3');
-          setParticipants(prev => [...prev, { 
-            identity: 'mock-user-3', 
-            name: 'New User', 
-            metadata: '{"muted":false}' 
-          }]);
-        }
-      }, 3000);
-      
-      return () => {
-        clearTimeout(timer);
-        setIsConnected(false);
-        setParticipants([]);
-        setRemoteTracks({});
-      };
+      return;
     }
 
-    // REAL LiveKit mode
-    setIsMockMode(false);
     const livekitRoom = new Room({
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      publishDefaults: {
-        dtx: true,
-        red: true,
-      },
+      audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true },
     });
 
     setRoom(livekitRoom);
 
     const connect = async () => {
       try {
-        // Use the LIVEKIT_HOST from env or default to localhost
-        const host = import.meta.env.VITE_LIVEKIT_HOST || 'ws://localhost:7880';
-        
-        await livekitRoom.connect(host, token);
+        await livekitRoom.connect("ws://localhost:7880", token);
         setIsConnected(true);
-        setError(null);
+        const local =
+          await livekitRoom.localParticipant.setMicrophoneEnabled(true);
+        setLocalTrack(local);
 
-        const track = await livekitRoom.localParticipant.setMicrophoneEnabled(true);
-        setLocalTrack(track);
-        setIsMuted(false);
-
-        livekitRoom.on(RoomEvent.ParticipantConnected, (participant: Participant) => {
-          setParticipants((prev) => [...prev, participant]);
-          if (onParticipantJoined) onParticipantJoined(participant.identity);
-        });
-
-        livekitRoom.on(RoomEvent.ParticipantDisconnected, (participant: Participant) => {
-          setParticipants((prev) => prev.filter((p) => p.identity !== participant.identity));
-          if (onParticipantLeft) onParticipantLeft(participant.identity);
-        });
-
-        livekitRoom.on(RoomEvent.TrackSubscribed, (track: any, participant: Participant) => {
-          if (track.kind === 'audio') {
-            setRemoteTracks((prev) => ({
-              ...prev,
-              [participant.identity]: track,
-            }));
-            const audioElement = track.attach();
-            audioElement.play().catch(console.warn);
+        livekitRoom.on(RoomEvent.TrackSubscribed, (track: any) => {
+          if (track.kind === "audio") {
+            setRemoteTracks((prev) => [...prev, track]);
           }
         });
 
-        livekitRoom.on(RoomEvent.TrackUnsubscribed, (track: any, participant: Participant) => {
-          if (track.kind === 'audio') {
-            setRemoteTracks((prev) => {
-              const newTracks = { ...prev };
-              delete newTracks[participant.identity];
-              return newTracks;
-            });
-            track.detach();
+        livekitRoom.on(RoomEvent.TrackUnsubscribed, (track: any) => {
+          if (track.kind === "audio") {
+            setRemoteTracks((prev) => prev.filter((t) => t !== track));
           }
         });
 
-        const initialParticipants = Array.from(livekitRoom.participants.values());
-        setParticipants(initialParticipants);
-
-      } catch (err: any) {
-        console.error('LiveKit connection error:', err);
-        // Fallback to mock mode on connection error
-        if (import.meta.env.NODE_ENV === 'development') {
-          console.log('🔄 Falling back to MOCK mode due to connection error');
-          setIsMockMode(true);
-          setIsConnected(true);
-          setParticipants([
-            { identity: 'mock-user-1', name: 'Test User 1' },
-            { identity: 'mock-user-2', name: 'Test User 2' },
-          ]);
-        } else {
-          setError('Failed to connect to voice server. Please try again.');
+        if (options?.onTrackSubscribed) {
+          livekitRoom.on(RoomEvent.TrackSubscribed, options.onTrackSubscribed);
         }
+      } catch (error) {
+        console.error("LiveKit connection error:", error);
+        setIsConnected(false);
       }
     };
 
     connect();
 
     return () => {
-      livekitRoom.disconnect();
-      setRoom(null);
-      setIsConnected(false);
-      setParticipants([]);
-      setRemoteTracks({});
+      if (livekitRoom) {
+        livekitRoom.disconnect();
+      }
     };
-  }, [token, roomName, onParticipantJoined, onParticipantLeft]);
+  }, [token, roomName]);
 
-  return {
-    room,
-    isConnected,
-    participants,
-    remoteTracks,
-    isMuted,
-    toggleMute,
-    error,
-    isMockMode,
-  };
+  return { room, localTrack, remoteTracks, isConnected };
 };
+
 // ---------- Recording Hook ----------
 
 export const useVoiceRecording = (roomId: string) => {
