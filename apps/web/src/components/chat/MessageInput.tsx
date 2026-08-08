@@ -81,6 +81,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [isTypingState, setIsTypingState] = useState(false);
+  const [showReconnect, setShowReconnect] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +89,21 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const videoInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ✅ Handle connection status with delay
+  useEffect(() => {
+    console.log('🔌 MessageInput isConnected:', isConnected);
+    
+    if (!isConnected) {
+      // Show reconnecting message after 2 seconds of disconnection
+      const timer = setTimeout(() => {
+        setShowReconnect(true);
+      }, 2000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowReconnect(false);
+    }
+  }, [isConnected]);
 
   // Reset content when editing message changes
   useEffect(() => {
@@ -284,13 +300,23 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         multiple={false}
       />
 
-      {/* Connection status */}
-      {!isConnected && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
-          <Clock className="w-4 h-4 text-amber-500 animate-pulse" />
+      {/* ✅ Connection status - Only show after delay and when truly disconnected */}
+      {showReconnect && !isConnected && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl animate-pulse">
+          <Clock className="w-4 h-4 text-amber-500 animate-spin" />
           <span className="text-xs text-amber-700 font-medium">
             Reconnecting... Messages will be sent when connection is restored
           </span>
+          <button 
+            onClick={() => {
+              setShowReconnect(false);
+              // Force reconnection attempt
+              window.location.reload();
+            }}
+            className="ml-auto text-xs text-amber-600 hover:text-amber-800 font-medium underline"
+          >
+            Retry
+          </button>
         </div>
       )}
 

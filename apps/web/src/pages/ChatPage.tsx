@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useChats } from "../hooks/useChat";
 import { ChatList } from "../components/chat/ChatList";
 import { useParams } from 'react-router-dom';
@@ -15,7 +15,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 export const ChatPage = () => {
   const { user } = useAuth();
-  const { chatId: urlChatId } = useParams<{ chatId?: string }>(); // Move useParams here
+  const { chatId: urlChatId } = useParams<{ chatId?: string }>();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(
     null,
@@ -25,8 +25,13 @@ export const ChatPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Handle URL params for direct navigation
-  useEffect(() => {
+  // ✅ Use useMemo to prevent unnecessary re-renders
+  const hasSelection = useMemo(() => {
+    return !!(selectedChatId || selectedCommunityId);
+  }, [selectedChatId, selectedCommunityId]);
+
+  // ✅ Handle URL params with useCallback to prevent re-creation
+  const updateFromUrl = useCallback(() => {
     const params = new URLSearchParams(location.search);
     const chatId = params.get("chatId");
     const communityId = params.get("communityId");
@@ -37,56 +42,133 @@ export const ChatPage = () => {
     } else if (communityId) {
       setSelectedCommunityId(communityId);
       setSelectedChatId(null);
-    } else if (urlChatId) { // Use the URL param from useParams
+    } else if (urlChatId) {
       setSelectedChatId(urlChatId);
       setSelectedCommunityId(null);
     }
-  }, [location, urlChatId]); // Add urlChatId to dependencies
+  }, [location.search, urlChatId]);
 
-  // Filter chats based on search query using real auth user ID
-  const filteredChats = chats?.filter((chat) => {
-    if (!searchQuery) return true;
-    const searchLower = searchQuery.toLowerCase();
+  // Handle URL params for direct navigation
+  useEffect(() => {
+    updateFromUrl();
+  }, [updateFromUrl]);
 
-    // Search by chat name
-    if (chat.name?.toLowerCase().includes(searchLower)) return true;
+  // ✅ Filter chats with useMemo to prevent recalculation on every render
+  const filteredChats = useMemo(() => {
+    if (!chats) return [];
+    
+    return chats.filter((chat) => {
+      if (!searchQuery) return true;
+      const searchLower = searchQuery.toLowerCase();
 
-    // Search by participant names (for private chats)
-    if (chat.type === "PRIVATE") {
-      const otherParticipant = chat.participants.find(
-        (p) => p.userId !== user?.id,
-      );
-      if (otherParticipant?.user.name.toLowerCase().includes(searchLower))
-        return true;
-    }
+      // Search by chat name
+      if (chat.name?.toLowerCase().includes(searchLower)) return true;
 
-    return false;
-  });
+      // Search by participant names (for private chats)
+      if (chat.type === "PRIVATE") {
+        const otherParticipant = chat.participants.find(
+          (p) => p.userId !== user?.id,
+        );
+        if (otherParticipant?.user.name.toLowerCase().includes(searchLower))
+          return true;
+      }
 
-  const handleSelectChat = (chatId: string) => {
+      return false;
+    });
+  }, [chats, searchQuery, user?.id]);
+
+  // ✅ Memoized handlers to prevent re-creation
+  const handleSelectChat = useCallback((chatId: string) => {
     setSelectedChatId(chatId);
     setSelectedCommunityId(null);
-    // Update URL
     navigate(`?chatId=${chatId}`, { replace: true });
-  };
+  }, [navigate]);
 
-  const handleSelectCommunity = (communityId: string) => {
+  const handleSelectCommunity = useCallback((communityId: string) => {
     setSelectedCommunityId(communityId);
     setSelectedChatId(null);
     navigate(`?communityId=${communityId}`, { replace: true });
-  };
+  }, [navigate]);
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     setSelectedChatId(null);
     setSelectedCommunityId(null);
     navigate("", { replace: true });
-  };
+  }, [navigate]);
 
-  const handleCreateNewChat = () => {
+  const handleCreateNewChat = useCallback(() => {
     navigate("/chat/new");
-  };
+  }, [navigate]);
 
-  const hasSelection = selectedChatId || selectedCommunityId;
+  // ✅ Memoize the ChatWindow component to prevent re-renders
+  const chatWindowContent = useMemo(() => {
+    if (selectedChatId) {
+      return (
+        <div className="flex flex-col h-full relative">
+          {/* Mobile Back Button Bar */}
+          <div className="md:hidden bg-white border-b border-slate-100 px-4 py-3 flex items-center gap-3">
+            <button
+              onClick={handleBack}
+              className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all active:scale-95 flex items-center gap-1.5 text-xs font-bold"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Chats</span>
+            </button>
+          </div>
+
+          {/* Active Chat Component Container */}
+          <div className="flex-1 overflow-hidden">
+            <ChatWindow key={selectedChatId} chatId={selectedChatId} onBack={handleBack} />
+          </div>
+        </div>
+      );
+    } else if (selectedCommunityId) {
+      return (
+        <div className="flex flex-col h-full relative">
+          {/* Mobile Back Button Bar */}
+          <div className="md:hidden bg-white border-b border-slate-100 px-4 py-3 flex items-center gap-3">
+            <button
+              onClick={handleBack}
+              className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all active:scale-95 flex items-center gap-1.5 text-xs font-bold"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Chats</span>
+            </button>
+          </div>
+
+          {/* Active Community Chat Component Container */}
+          <div className="flex-1 overflow-hidden">
+            <ChatWindow key={selectedCommunityId} communityId={selectedCommunityId} onBack={handleBack} />
+          </div>
+        </div>
+      );
+    } else {
+      return (
+        /* Empty Desktop View */
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
+          <div className="w-16 h-16 rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-sm">
+            <MessagesSquare className="w-8 h-8" />
+          </div>
+          <div className="space-y-1 max-w-sm">
+            <h3 className="text-lg font-bold text-slate-800">
+              Select a Conversation
+            </h3>
+            <p className="text-xs text-slate-500">
+              Choose a chat from the sidebar to view messages, practice
+              languages, and stay connected.
+            </p>
+          </div>
+          <button
+            onClick={handleCreateNewChat}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Conversation
+          </button>
+        </div>
+      );
+    }
+  }, [selectedChatId, selectedCommunityId, handleBack, handleCreateNewChat]);
 
   if (isLoading) {
     return <ChatPageSkeleton />;
@@ -179,69 +261,7 @@ export const ChatPage = () => {
             !hasSelection ? "hidden md:flex" : "flex"
           }`}
         >
-          {selectedChatId ? (
-            <div className="flex flex-col h-full relative">
-              {/* Mobile Back Button Bar */}
-              <div className="md:hidden bg-white border-b border-slate-100 px-4 py-3 flex items-center gap-3">
-                <button
-                  onClick={handleBack}
-                  className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all active:scale-95 flex items-center gap-1.5 text-xs font-bold"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Back to Chats</span>
-                </button>
-              </div>
-
-              {/* Active Chat Component Container */}
-              <div className="flex-1 overflow-hidden">
-                <ChatWindow chatId={selectedChatId} onBack={handleBack} />
-              </div>
-            </div>
-          ) : selectedCommunityId ? (
-            <div className="flex flex-col h-full relative">
-              {/* Mobile Back Button Bar */}
-              <div className="md:hidden bg-white border-b border-slate-100 px-4 py-3 flex items-center gap-3">
-                <button
-                  onClick={handleBack}
-                  className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all active:scale-95 flex items-center gap-1.5 text-xs font-bold"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  <span>Back to Chats</span>
-                </button>
-              </div>
-
-              {/* Active Community Chat Component Container */}
-              <div className="flex-1 overflow-hidden">
-                <ChatWindow
-                  communityId={selectedCommunityId}
-                  onBack={handleBack}
-                />
-              </div>
-            </div>
-          ) : (
-            /* Empty Desktop View */
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
-              <div className="w-16 h-16 rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-sm">
-                <MessagesSquare className="w-8 h-8" />
-              </div>
-              <div className="space-y-1 max-w-sm">
-                <h3 className="text-lg font-bold text-slate-800">
-                  Select a Conversation
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Choose a chat from the sidebar to view messages, practice
-                  languages, and stay connected.
-                </p>
-              </div>
-              <button
-                onClick={handleCreateNewChat}
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                New Conversation
-              </button>
-            </div>
-          )}
+          {chatWindowContent}
         </div>
       </div>
     </div>

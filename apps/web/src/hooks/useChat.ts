@@ -99,7 +99,6 @@ export interface SendMessagePayload {
 // ---------- API Calls ----------
 
 export const chatApi = {
-  // Chats
   getUserChats: () => apiClient.get<Chat[]>("/chat"),
   getChatById: (chatId: string) => apiClient.get<Chat>(`/chat/${chatId}`),
   getMessages: (chatId: string, params?: { limit?: number; before?: string }) =>
@@ -558,8 +557,9 @@ export const useSearchMessages = (chatId: string, query: string) => {
 
 // ============ WEBSOCKET HOOK ============
 
-// ✅ FIX: Get the correct server URL from environment
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "http://localhost:3001"; // ⚠️ Use your NestJS server port!
+// ✅ HARDCODE THE URL - THIS IS THE SIMPLEST FIX
+const SOCKET_URL = "http://localhost:3000";
+console.log("🔌 Socket URL:", SOCKET_URL);
 
 export const useChatSocket = (
   chatId: string | null,
@@ -578,65 +578,113 @@ export const useChatSocket = (
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const queryClient = useQueryClient();
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
 
-  // Get token from storage
+  // ✅ ADD THESE REFS
+  const isConnectingRef = useRef(false);
+  const socketRef = useRef<Socket | null>(null);
+
   const getToken = useCallback(() => {
-    // Try multiple sources for the token
-    const token =
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      sessionStorage.getItem("accessToken") ||
-      document.cookie
-        .split("; ")
-        .find((row) => row.startsWith("accessToken="))
-        ?.split("=")[1];
+    try {
+      let token =
+        localStorage.getItem("accessToken") || localStorage.getItem("token");
 
-    return token;
+      if (token && token !== "undefined" && token !== "null") {
+        return token;
+      }
+
+      token =
+        sessionStorage.getItem("accessToken") ||
+        sessionStorage.getItem("token");
+
+      if (token && token !== "undefined" && token !== "null") {
+        return token;
+      }
+
+      const cookies = document.cookie.split("; ");
+      for (const cookie of cookies) {
+        const [name, value] = cookie.split("=");
+        if (name === "accessToken" || name === "token") {
+          if (value && value !== "undefined" && value !== "null") {
+            return value;
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      console.warn("⚠️ Error getting token:", e);
+      return null;
+    }
   }, []);
 
+  // ✅ Effect for joining/leaving rooms (does NOT reconnect)
+  useEffect(() => {
+    if (!socketRef.current || !isConnected || !chatId) return;
+
+    console.log(`📚 Joining chat room: ${chatId}`);
+    socketRef.current.emit("chat:join", { chatId });
+
+    return () => {
+      if (socketRef.current && isConnected) {
+        console.log(`📚 Leaving chat room: ${chatId}`);
+        socketRef.current.emit("chat:leave", { chatId });
+      }
+    };
+  }, [chatId, isConnected]);
+
+  // ✅ MAIN SOCKET CONNECTION - ONLY RUNS ONCE
   useEffect(() => {
     if (!userId) {
       console.log("⏳ Waiting for userId to connect socket");
       return;
     }
 
-    const token = getToken();
-    if (!token) {
-      console.warn("⚠️ No token found, socket connection may fail");
-      // Try to connect anyway - the server will handle it
+    // ✅ Prevent multiple connection attempts
+    if (isConnectingRef.current) {
+      console.log("⏳ Already connecting, skipping...");
+      return;
     }
 
-    console.log(`🔌 Connecting to socket server at: ${SOCKET_URL}/chat`);
-    console.log(`👤 User ID: ${userId}`);
-    console.log(`🔑 Token present: ${!!token}`);
+    // ✅ Skip if already connected
+    if (socketRef.current && socketRef.current.connected) {
+      console.log("✅ Socket already connected, skipping...");
+      return;
+    }
 
-    // ✅ FIX: Use the correct namespace and port
-    const s = io(`${SOCKET_URL}/chat`, {
+    isConnectingRef.current = true;
+
+    const token = getToken();
+    console.log("🔑 Token retrieved:", token ? "✅ Present" : "❌ Missing");
+
+    const socketUrl = "http://localhost:3000";
+    console.log(`🔌 Connecting to: ${socketUrl}/chat`);
+
+    const s = io(`${socketUrl}/chat`, {
       withCredentials: true,
-      transports: ["websocket", "polling"], // Fallback to polling if websocket fails
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
       auth: {
-        token: token,
+        token: token || undefined,
       },
       query: {
         userId: userId,
+        token: token || undefined,
       },
     });
 
-    // --- Connection Events ---
+    socketRef.current = s;
+    setSocket(s);
+
     s.on("connect", () => {
-      console.log("✅ Connected to chat socket");
+      console.log("✅ Connected to chat socket", s.id);
       setIsConnected(true);
       setReconnectAttempts(0);
+      isConnectingRef.current = false;
 
-      // Join the chat room if we have a chatId
       if (chatId) {
         console.log(`📚 Joining chat room: ${chatId}`);
         s.emit("chat:join", { chatId });
@@ -647,7 +695,6 @@ export const useChatSocket = (
       console.log(`❌ Disconnected from chat socket: ${reason}`);
       setIsConnected(false);
 
-      // Server initiated disconnect - attempt to reconnect
       if (reason === "io server disconnect") {
         console.log("🔄 Server disconnected, attempting to reconnect...");
         setTimeout(() => {
@@ -659,11 +706,11 @@ export const useChatSocket = (
     });
 
     s.on("connect_error", (err) => {
-      console.error("❌ Chat socket connection error:", err);
+      console.error("❌ Chat socket connection error:", err.message);
       setIsConnected(false);
       setReconnectAttempts((prev) => prev + 1);
+      isConnectingRef.current = false;
 
-      // Show error after multiple attempts
       if (reconnectAttempts >= 5) {
         toast.error(
           "Failed to connect to chat server. Please refresh the page.",
@@ -675,11 +722,7 @@ export const useChatSocket = (
       console.log(`🔄 Reconnected after ${attemptNumber} attempts`);
       setIsConnected(true);
       setReconnectAttempts(0);
-
-      // Rejoin the chat room
-      if (chatId) {
-        s.emit("chat:join", { chatId });
-      }
+      isConnectingRef.current = false;
     });
 
     s.on("reconnect_failed", () => {
@@ -687,12 +730,13 @@ export const useChatSocket = (
       toast.error(
         "Unable to connect to chat server. Please check your connection.",
       );
+      isConnectingRef.current = false;
     });
 
-    // ✅ FIX: Connection established event
     s.on("connection:established", (data) => {
       console.log("✅ Connection established:", data);
       setIsConnected(true);
+      isConnectingRef.current = false;
     });
 
     // ---------- Message Events ----------
@@ -721,7 +765,6 @@ export const useChatSocket = (
 
     s.on("message:sent", (message: Message) => {
       console.log("✅ Message sent confirmation:", message);
-      // Optional: show success or update UI
     });
 
     s.on(
@@ -916,30 +959,25 @@ export const useChatSocket = (
       toast.error(data.message || "Socket error occurred");
     });
 
-    setSocket(s);
-
+    // ✅ CLEANUP - only runs when userId changes
     return () => {
-      // Clear all timeouts
+      console.log("🧹 Cleaning up socket connection");
+      isConnectingRef.current = false;
+
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
+
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
 
-      // Leave chat room
-      if (chatId && s.connected) {
-        s.emit("chat:leave", { chatId });
-      }
-
-      // Disconnect
-      s.disconnect();
       setSocket(null);
       setIsConnected(false);
     };
-  }, [chatId, userId, queryClient, options, reconnectAttempts, getToken]);
+  }, [userId]); // ✅ ONLY DEPENDS ON userId
 
   // ---------- Socket Actions ----------
   const sendMessage = useCallback(
@@ -949,7 +987,7 @@ export const useChatSocket = (
         communityId?: string;
       },
     ) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
@@ -960,9 +998,9 @@ export const useChatSocket = (
       };
 
       console.log("📤 Sending message via socket:", finalPayload);
-      socket.emit("message:send", finalPayload);
+      socketRef.current.emit("message:send", finalPayload);
     },
-    [socket, isConnected, chatId],
+    [isConnected, chatId],
   );
 
   const sendVoiceMessage = useCallback(
@@ -972,7 +1010,7 @@ export const useChatSocket = (
       audioUrl: string;
       duration: number;
     }) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
@@ -982,14 +1020,14 @@ export const useChatSocket = (
         chatId: payload.chatId || chatId || undefined,
       };
 
-      socket.emit("voice:message:send", finalPayload);
+      socketRef.current.emit("voice:message:send", finalPayload);
     },
-    [socket, isConnected, chatId],
+    [isConnected, chatId],
   );
 
   const sendTyping = useCallback(
     (isTyping: boolean, targetId?: string, isCommunity: boolean = false) => {
-      if (!socket || !isConnected) return;
+      if (!socketRef.current || !isConnected) return;
 
       const id = targetId || chatId;
       if (!id) return;
@@ -997,7 +1035,7 @@ export const useChatSocket = (
       const event = isTyping ? "typing:start" : "typing:stop";
       const payload = isCommunity ? { communityId: id } : { chatId: id };
 
-      socket.emit(event, payload);
+      socketRef.current.emit(event, payload);
 
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -1006,18 +1044,18 @@ export const useChatSocket = (
 
       if (isTyping) {
         typingTimeoutRef.current = setTimeout(() => {
-          if (socket && isConnected) {
-            socket.emit("typing:stop", payload);
+          if (socketRef.current && isConnected) {
+            socketRef.current.emit("typing:stop", payload);
           }
         }, 3000);
       }
     },
-    [socket, isConnected, chatId],
+    [isConnected, chatId],
   );
 
   const emitRead = useCallback(
     (messageId: string, targetId?: string, isCommunity: boolean = false) => {
-      if (!socket || !isConnected) return;
+      if (!socketRef.current || !isConnected) return;
 
       const id = targetId || chatId;
       if (!id) return;
@@ -1026,42 +1064,42 @@ export const useChatSocket = (
         ? { communityId: id, messageId }
         : { chatId: id, messageId };
 
-      socket.emit("message:read", payload);
+      socketRef.current.emit("message:read", payload);
     },
-    [socket, isConnected, chatId],
+    [isConnected, chatId],
   );
 
   const deleteMessage = useCallback(
     (messageId: string) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      socket.emit("message:delete", { messageId });
+      socketRef.current.emit("message:delete", { messageId });
     },
-    [socket, isConnected],
+    [isConnected],
   );
 
   const editMessage = useCallback(
     (messageId: string, content: string) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      socket.emit("message:edit", { messageId, content });
+      socketRef.current.emit("message:edit", { messageId, content });
     },
-    [socket, isConnected],
+    [isConnected],
   );
 
   const pinMessage = useCallback(
     (messageId: string, pinned: boolean) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      socket.emit("message:pin", { messageId, pinned });
+      socketRef.current.emit("message:pin", { messageId, pinned });
     },
-    [socket, isConnected],
+    [isConnected],
   );
 
   const fetchMessages = useCallback(
@@ -1071,36 +1109,36 @@ export const useChatSocket = (
       limit?: number;
       before?: string;
     }) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      socket.emit("messages:fetch", params);
+      socketRef.current.emit("messages:fetch", params);
     },
-    [socket, isConnected],
+    [isConnected],
   );
 
   const joinChat = useCallback(
     (chatIdToJoin: string) => {
-      if (!socket || !isConnected) {
+      if (!socketRef.current || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
-      socket.emit("chat:join", { chatId: chatIdToJoin });
+      socketRef.current.emit("chat:join", { chatId: chatIdToJoin });
     },
-    [socket, isConnected],
+    [isConnected],
   );
 
   const leaveChat = useCallback(
     (chatIdToLeave: string) => {
-      if (!socket || !isConnected) return;
-      socket.emit("chat:leave", { chatId: chatIdToLeave });
+      if (!socketRef.current || !isConnected) return;
+      socketRef.current.emit("chat:leave", { chatId: chatIdToLeave });
     },
-    [socket, isConnected],
+    [isConnected],
   );
 
   return {
-    socket,
+    socket: socketRef.current,
     isConnected,
     typingUsers,
     onlineUsers,
@@ -1193,13 +1231,11 @@ export const useVoiceMessageRecorder = () => {
         timerRef.current = null;
       }
 
-      // Wait for the blob to be set
       const checkBlob = setInterval(() => {
         if (audioBlob) {
           clearInterval(checkBlob);
           resolve(audioBlob);
         } else {
-          // If no blob after 2 seconds, resolve with empty blob
           setTimeout(() => {
             clearInterval(checkBlob);
             resolve(new Blob());
@@ -1230,7 +1266,6 @@ export const useVoiceMessageRecorder = () => {
     chunksRef.current = [];
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (timerRef.current) {
