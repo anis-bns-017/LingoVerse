@@ -57,27 +57,21 @@ export const ChatList: React.FC<ChatListProps> = ({
 }) => {
   const { user } = useAuth();
 
-  const getOtherParticipant = (chat: Chat) => {
-    return chat.participants?.find((p) => p.userId !== user?.id)?.user;
-  };
+  const getOtherParticipant = (chat: Chat) =>
+    chat.participants?.find((p) => p.userId !== user?.id)?.user;
 
-  const getMyParticipant = (chat: Chat) => {
-    return chat.participants?.find((p) => p.userId === user?.id);
-  };
+  const getMyParticipant = (chat: Chat) =>
+    chat.participants?.find((p) => p.userId === user?.id);
 
   const getChatName = (chat: Chat) => {
     if (chat.type === "PRIVATE") {
-      const otherUser = getOtherParticipant(chat);
-      return otherUser?.name || "Unknown User";
+      return getOtherParticipant(chat)?.name || "Unknown User";
     }
     return chat.name || "Group Chat";
   };
 
   const getChatAvatar = (chat: Chat) => {
-    if (chat.type === "PRIVATE") {
-      const otherUser = getOtherParticipant(chat);
-      return otherUser?.avatarUrl;
-    }
+    if (chat.type === "PRIVATE") return getOtherParticipant(chat)?.avatarUrl;
     return chat.avatarUrl;
   };
 
@@ -128,7 +122,6 @@ export const ChatList: React.FC<ChatListProps> = ({
     );
   };
 
-  // Sort only (filtering is already done in ChatPage)
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
       const aPinned = getMyParticipant(a)?.isPinned ? 1 : 0;
@@ -170,7 +163,6 @@ export const ChatList: React.FC<ChatListProps> = ({
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-indigo-600 rounded-r-full" />
               )}
 
-              {/* Avatar */}
               <div className="relative shrink-0">
                 {avatarUrl ? (
                   <img
@@ -180,7 +172,7 @@ export const ChatList: React.FC<ChatListProps> = ({
                   />
                 ) : (
                   <div
-                    className={`w-12 h-12 rounded-2xl font-bold text-base flex items-center justify-center border transition-all ${
+                    className={`w-12 h-12 rounded-2xl font-bold text-base flex items-center justify-center border ${
                       isSelected
                         ? "bg-indigo-600 text-white border-indigo-600"
                         : "bg-gradient-to-br from-slate-100 to-slate-200 text-slate-700 border-slate-200/60"
@@ -191,7 +183,7 @@ export const ChatList: React.FC<ChatListProps> = ({
                 )}
 
                 <div
-                  className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-lg flex items-center justify-center text-[10px] border shadow-xs ${
+                  className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-lg flex items-center justify-center border ${
                     isGroup
                       ? "bg-indigo-100 text-indigo-700 border-indigo-200"
                       : "bg-white text-slate-500 border-slate-100"
@@ -209,7 +201,6 @@ export const ChatList: React.FC<ChatListProps> = ({
                 )}
               </div>
 
-              {/* Text metadata */}
               <div className="flex-1 min-w-0 space-y-0.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1 min-w-0">
@@ -217,7 +208,7 @@ export const ChatList: React.FC<ChatListProps> = ({
                       <Pin className="w-3 h-3 text-indigo-400 shrink-0" />
                     )}
                     <h4
-                      className={`font-bold text-xs truncate transition-colors ${
+                      className={`font-bold text-xs truncate ${
                         isSelected ? "text-indigo-950" : "text-slate-800"
                       }`}
                     >
@@ -242,7 +233,7 @@ export const ChatList: React.FC<ChatListProps> = ({
 
                 <div className="flex items-center justify-between gap-2">
                   <div
-                    className={`text-xs truncate flex-1 transition-colors ${
+                    className={`text-xs truncate flex-1 ${
                       unread
                         ? "text-slate-700 font-medium"
                         : isSelected
@@ -254,13 +245,13 @@ export const ChatList: React.FC<ChatListProps> = ({
                   </div>
 
                   {unread && (
-                    <div className="shrink-0 flex items-center justify-center">
+                    <div className="shrink-0">
                       {chat.unreadCount && chat.unreadCount > 0 ? (
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold text-white bg-indigo-600 rounded-full min-w-[1.25rem] text-center leading-none">
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold text-white bg-indigo-600 rounded-full min-w-[1.25rem] text-center">
                           {chat.unreadCount > 99 ? "99+" : chat.unreadCount}
                         </span>
                       ) : (
-                        <span className="w-2 h-2 rounded-full bg-indigo-600" />
+                        <span className="w-2 h-2 rounded-full bg-indigo-600 block" />
                       )}
                     </div>
                   )}

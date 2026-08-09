@@ -65,8 +65,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   // ─── State ───────────────────────────────────────────────────────────────
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Message[]>([]);
@@ -88,12 +86,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastReadIdRef = useRef<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const searchHighlightRef = useRef<HTMLDivElement | null>(null);
+  const isNearBottomRef = useRef(true);
 
-  // ─── Data hooks ──────────────────────────────────────────────────────────
+  // ─── Data ────────────────────────────────────────────────────────────────
   const { data: chat } = useChat(chatId || "");
   const {
     data: chatMessages,
@@ -108,15 +104,42 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     hasNextPage: hasNextCommunityPage,
   } = useCommunityMessages(communityId || "");
 
-  const messages = isCommunity ? communityMessages : chatMessages;
+  const rawMessages = isCommunity ? communityMessages : chatMessages;
   const isLoading = isCommunity ? isLoadingCommunity : isLoadingChat;
   const hasMore = isCommunity ? hasNextCommunityPage : hasNextPage;
+
+  // Oldest → newest (latest at bottom)
+  const messages = useMemo(() => {
+    if (!rawMessages?.length) return [];
+    return [...rawMessages].sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+  }, [rawMessages]);
 
   const sendMessageRest = useSendMessage();
   const sendCommunityMessageRest = useSendCommunityMessage();
   const deleteMessageMutation = useDeleteMessage();
   const editMessageMutation = useEditMessage();
   const pinMessageMutation = usePinMessage();
+
+  // Keep scroll position flag in a ref so socket callback stays stable
+  useEffect(() => {
+    isNearBottomRef.current = isNearBottom;
+  }, [isNearBottom]);
+
+  const onNewMessage = useCallback(() => {
+    if (isNearBottomRef.current) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      });
+    } else {
+      toast.info("New message", { duration: 2000 });
+    }
+  }, []);
+
+  // Stable options object — prevents reconnect loops
+  const socketOptions = useMemo(() => ({ onNewMessage }), [onNewMessage]);
 
   const {
     socket,
@@ -130,17 +153,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     deleteMessage: deleteSocketMessage,
     editMessage: editSocketMessage,
     pinMessage: pinSocketMessage,
-  } = useChatSocket(targetId, user?.id || "", {
-    onNewMessage: () => {
-      if (isNearBottom) {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      } else {
-        toast.info("New message", { duration: 2000 });
-      }
-    },
-  });
+  } = useChatSocket(targetId, user?.id || "", socketOptions);
 
-  // ─── Derived values ──────────────────────────────────────────────────────
+  // ─── Derived ─────────────────────────────────────────────────────────────
   const chatName = useMemo(() => {
     if (isCommunity) return "Community Chat";
     if (!chat) return "Loading…";
@@ -182,7 +197,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     setSearchIndex(0);
   }, [searchQuery, messages]);
 
-  // Jump to current search result
   useEffect(() => {
     if (searchResults.length === 0 || !searchHighlightRef.current) return;
     searchHighlightRef.current.scrollIntoView({
@@ -191,48 +205,48 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     });
   }, [searchIndex, searchResults]);
 
-  // ─── Auto-scroll & read receipts ─────────────────────────────────────────
+  // ─── Scroll ──────────────────────────────────────────────────────────────
+  const scrollToBottom = useCallback((smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+    });
+  }, []);
+
   useEffect(() => {
-    if (isNearBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages?.length, isNearBottom]);
+    if (!messages.length) return;
+    if (isNearBottom) scrollToBottom(messages.length > 5);
+  }, [messages.length, isNearBottom, scrollToBottom]);
 
   useEffect(() => {
     if (!messages?.length || !user?.id) return;
     const last = messages[messages.length - 1];
     if (last.senderId === user.id || lastReadIdRef.current === last.id) return;
     lastReadIdRef.current = last.id;
-    emitRead(last.id);
+    emitRead?.(last.id);
   }, [messages, user?.id, emitRead]);
 
-  // ─── Scroll handler ──────────────────────────────────────────────────────
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
-
     const { scrollTop, scrollHeight, clientHeight } = el;
     const nearBottom = scrollHeight - scrollTop - clientHeight < 120;
     setIsNearBottom(nearBottom);
     setShowScrollButton(!nearBottom);
 
-    // Load older messages
     if (scrollTop < 80 && hasMore && !isLoadingMore) {
       setIsLoadingMore(true);
       const prevHeight = scrollHeight;
-
       const promise = isCommunity ? fetchNextCommunityPage() : fetchNextPage();
-
-      promise?.then?.(() => {
-        // Keep scroll position stable after prepending
-        requestAnimationFrame(() => {
-          if (messagesContainerRef.current) {
-            const newHeight = messagesContainerRef.current.scrollHeight;
-            messagesContainerRef.current.scrollTop = newHeight - prevHeight;
-          }
-          setIsLoadingMore(false);
-        });
-      });
+      Promise.resolve(promise)
+        .then(() => {
+          requestAnimationFrame(() => {
+            if (messagesContainerRef.current) {
+              const newHeight = messagesContainerRef.current.scrollHeight;
+              messagesContainerRef.current.scrollTop = newHeight - prevHeight;
+            }
+          });
+        })
+        .finally(() => setIsLoadingMore(false));
     }
   }, [
     hasMore,
@@ -242,144 +256,149 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     fetchNextCommunityPage,
   ]);
 
-  // ─── Send / Edit message (THE FIX) ───────────────────────────────────────
-  const handleSend = async (
-    content: string,
-    type?: string,
-    mediaUrl?: string,
-    fileUrl?: string,
-  ) => {
-    const trimmed = content.trim();
-    if (!trimmed && !mediaUrl && !fileUrl) return;
+  // ─── Send / Edit ─────────────────────────────────────────────────────────
+  const handleSend = useCallback(
+    async (
+      content: string,
+      type?: string,
+      mediaUrl?: string,
+      fileUrl?: string,
+    ) => {
+      const trimmed = content.trim();
+      if (!trimmed && !mediaUrl && !fileUrl) return;
 
-    // ── EDIT MODE ────────────────────────────────────────────────────────
-    if (editingMessage) {
+      if (editingMessage) {
+        try {
+          if (socket?.connected) {
+            editSocketMessage(editingMessage.id, trimmed);
+          } else {
+            await editMessageMutation.mutateAsync({
+              messageId: editingMessage.id,
+              content: trimmed,
+            });
+          }
+          toast.success("Message updated");
+        } catch {
+          toast.error("Failed to update message");
+        } finally {
+          setEditingMessage(null);
+          setReplyTo(null);
+        }
+        return;
+      }
+
+      const payload = {
+        content: trimmed,
+        type: type || "TEXT",
+        mediaUrl,
+        fileUrl,
+        replyToId: replyTo?.id,
+      };
+
       try {
         if (socket?.connected) {
-          editSocketMessage(editingMessage.id, trimmed);
+          sendSocketMessage(
+            isCommunity ? { communityId, ...payload } : { chatId, ...payload },
+          );
+        } else if (isCommunity) {
+          await sendCommunityMessageRest.mutateAsync({
+            communityId: communityId!,
+            ...payload,
+          });
         } else {
-          await editMessageMutation.mutateAsync({
-            messageId: editingMessage.id,
-            content: trimmed,
+          await sendMessageRest.mutateAsync({
+            chatId: chatId!,
+            ...payload,
           });
         }
-        toast.success("Message updated");
       } catch {
-        // mutation / socket error already handled upstream
-      } finally {
-        setEditingMessage(null);
-        setReplyTo(null);
+        toast.error("Failed to send message");
       }
-      return;
-    }
 
-    // ── NEW MESSAGE ──────────────────────────────────────────────────────
-    const payload = {
-      content: trimmed,
-      type: type || "TEXT",
-      mediaUrl,
-      fileUrl,
-      replyToId: replyTo?.id,
-    };
+      setReplyTo(null);
+      setEditingMessage(null);
+      setTimeout(() => scrollToBottom(true), 50);
+    },
+    [
+      editingMessage,
+      socket,
+      editSocketMessage,
+      editMessageMutation,
+      replyTo?.id,
+      isCommunity,
+      communityId,
+      chatId,
+      sendSocketMessage,
+      sendCommunityMessageRest,
+      sendMessageRest,
+      scrollToBottom,
+    ],
+  );
 
-    try {
-      if (socket?.connected) {
-        sendSocketMessage(
-          isCommunity ? { communityId, ...payload } : { chatId, ...payload },
-        );
-      } else if (isCommunity) {
-        await sendCommunityMessageRest.mutateAsync({
-          communityId: communityId!,
-          ...payload,
-        });
-      } else {
-        await sendMessageRest.mutateAsync({ chatId: chatId!, ...payload });
+  // ─── Voice from MessageInput (blob + duration) ───────────────────────────
+  const handleVoiceBlob = useCallback(
+    (blob: Blob, duration: number) => {
+      if (!blob || blob.size === 0) {
+        toast.error("Empty recording");
+        return;
       }
-    } catch {
-      // mutation onError already shows toast
-    }
 
-    setReplyTo(null);
-    setEditingMessage(null);
-  };
-
-  // ─── Voice recording ─────────────────────────────────────────────────────
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.stop();
-    }
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-
-  const handleVoiceRecording = useCallback(async () => {
-    if (isRecording) {
-      stopRecording();
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm;codecs=opus",
-      });
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      const audioUrl = URL.createObjectURL(blob);
+      const payload = {
+        content: "",
+        type: "VOICE_NOTE",
+        mediaUrl: audioUrl,
+        audioUrl,
+        duration: Math.max(1, Math.floor(duration || 1)),
+        replyToId: replyTo?.id,
       };
 
-      mediaRecorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const audioUrl = URL.createObjectURL(blob);
+      try {
+        if (socket?.connected) {
+          if (typeof sendSocketVoiceMessage === "function") {
+            sendSocketVoiceMessage(
+              isCommunity
+                ? { communityId, ...payload }
+                : { chatId, ...payload },
+            );
+          } else {
+            sendSocketMessage(
+              isCommunity
+                ? { communityId, ...payload }
+                : { chatId, ...payload },
+            );
+          }
+        } else if (isCommunity) {
+          sendCommunityMessageRest.mutate({
+            communityId: communityId!,
+            ...payload,
+          });
+        } else {
+          sendMessageRest.mutate({ chatId: chatId!, ...payload });
+        }
 
-        sendSocketVoiceMessage(
-          isCommunity
-            ? { communityId, audioUrl, duration: recordingDuration }
-            : { chatId, audioUrl, duration: recordingDuration },
-        );
-
-        setIsRecording(false);
-        setRecordingDuration(0);
-        chunksRef.current = [];
         toast.success("Voice message sent");
-      };
+        setReplyTo(null);
+        setTimeout(() => scrollToBottom(true), 50);
+      } catch {
+        toast.error("Failed to send voice message");
+      }
+    },
+    [
+      socket,
+      sendSocketVoiceMessage,
+      sendSocketMessage,
+      isCommunity,
+      communityId,
+      chatId,
+      replyTo?.id,
+      sendCommunityMessageRest,
+      sendMessageRest,
+      scrollToBottom,
+    ],
+  );
 
-      mediaRecorder.start(100);
-      setIsRecording(true);
-      setRecordingDuration(0);
-      timerRef.current = setInterval(() => {
-        setRecordingDuration((d) => d + 1);
-      }, 1000);
-    } catch {
-      toast.error("Microphone access denied");
-    }
-  }, [
-    isRecording,
-    recordingDuration,
-    isCommunity,
-    chatId,
-    communityId,
-    sendSocketVoiceMessage,
-    stopRecording,
-  ]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      stopRecording();
-      mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [stopRecording]);
-
-  // ─── Message actions ─────────────────────────────────────────────────────
+  // ─── Actions ─────────────────────────────────────────────────────────────
   const handleDelete = useCallback(
     (id: string) => {
       if (socket?.connected) deleteSocketMessage(id);
@@ -421,37 +440,29 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const handleTyping = useCallback(
     (typing: boolean) => {
-      sendTyping(typing, targetId, isCommunity);
+      sendTyping?.(typing, targetId, isCommunity);
     },
     [sendTyping, targetId, isCommunity],
   );
 
-  // ─── Selection ───────────────────────────────────────────────────────────
-  const toggleSelection = (id: string) => {
+  const toggleSelection = useCallback((id: string) => {
     setSelectedMessages((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  const exitSelection = () => {
+  const exitSelection = useCallback(() => {
     setIsSelectionMode(false);
     setSelectedMessages(new Set());
-  };
+  }, []);
 
-  // ─── Helpers ─────────────────────────────────────────────────────────────
   const formatDateLabel = (date: Date) => {
     if (isToday(date)) return "Today";
     if (isYesterday(date)) return "Yesterday";
     return format(date, "EEEE, MMMM d");
-  };
-
-  const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
   // ─── Context menu ────────────────────────────────────────────────────────
@@ -463,19 +474,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     onClose: () => void;
   }) => {
     const isOwn = message.senderId === user?.id;
-
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: -4 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="absolute right-2 top-2 z-50 w-56 rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-xl shadow-slate-200/50 overflow-hidden"
+        className="absolute right-2 top-2 z-50 w-56 rounded-2xl border border-slate-200/80 bg-white/95 backdrop-blur-xl shadow-xl overflow-hidden"
       >
-        {/* Quick reactions */}
         <div className="flex items-center justify-around gap-1 px-3 py-2.5 border-b border-slate-100">
           {["❤️", "👍", "😂", "😮", "😢"].map((emoji) => (
             <button
               key={emoji}
+              type="button"
               onClick={() => {
                 handleReact(message.id, emoji);
                 onClose();
@@ -486,7 +496,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </button>
           ))}
         </div>
-
         <div className="py-1.5">
           <MenuItem
             icon={<Reply className="w-4 h-4" />}
@@ -511,7 +520,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               onClose();
             }}
           />
-
           {isOwn && (
             <>
               <div className="my-1 border-t border-slate-100" />
@@ -520,7 +528,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 label="Edit"
                 onClick={() => {
                   setEditingMessage(message);
-                  setReplyTo(null); // clear reply when starting edit
+                  setReplyTo(null);
                   onClose();
                 }}
               />
@@ -543,7 +551,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               />
             </>
           )}
-
           <div className="my-1 border-t border-slate-100" />
           <MenuItem
             icon={<Flag className="w-4 h-4" />}
@@ -571,6 +578,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     danger?: boolean;
   }) => (
     <button
+      type="button"
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
         danger
@@ -583,7 +591,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     </button>
   );
 
-  // ─── Loading ─────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-slate-50/40">
@@ -593,21 +600,22 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     );
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="relative flex h-full flex-col bg-slate-50/40">
-      {/* ── Header ─────────────────────────────────────────────────────── */}
+      {/* Header */}
       <header className="z-20 flex shrink-0 items-center gap-3 border-b border-slate-200/60 bg-white/90 px-3 py-2.5 backdrop-blur-md">
         {onBack && (
           <button
+            type="button"
             onClick={onBack}
-            className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 lg:hidden"
+            className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
         )}
 
         <button
+          type="button"
           onClick={() => setShowInfo(true)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
@@ -631,7 +639,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               />
             )}
           </div>
-
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-slate-900">
               {chatName}
@@ -658,8 +665,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         <div className="flex items-center gap-0.5">
           <button
+            type="button"
             onClick={() => setShowSearch((v) => !v)}
-            className={`rounded-xl p-2 transition ${
+            className={`rounded-xl p-2 ${
               showSearch
                 ? "bg-indigo-50 text-indigo-600"
                 : "text-slate-500 hover:bg-slate-100"
@@ -667,28 +675,33 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           >
             <Search className="h-5 w-5" />
           </button>
-
           {!isCommunity && !isGroup && (
             <>
-              <button className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100">
+              <button
+                type="button"
+                className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"
+              >
                 <Phone className="h-5 w-5" />
               </button>
-              <button className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100">
+              <button
+                type="button"
+                className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"
+              >
                 <Video className="h-5 w-5" />
               </button>
             </>
           )}
-
           <button
+            type="button"
             onClick={() => setShowInfo(true)}
-            className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100"
+            className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"
           >
             <MoreVertical className="h-5 w-5" />
           </button>
         </div>
       </header>
 
-      {/* ── Search bar ─────────────────────────────────────────────────── */}
+      {/* Search */}
       <AnimatePresence>
         {showSearch && (
           <motion.div
@@ -708,19 +721,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
                 />
               </div>
-
               {searchResults.length > 0 && (
                 <div className="flex items-center gap-1 text-xs text-slate-500">
                   <span>
                     {searchIndex + 1}/{searchResults.length}
                   </span>
                   <button
+                    type="button"
                     onClick={() => setSearchIndex((i) => Math.max(0, i - 1))}
                     className="rounded-lg p-1 hover:bg-slate-100"
                   >
                     <ChevronUp className="h-4 w-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() =>
                       setSearchIndex((i) =>
                         Math.min(searchResults.length - 1, i + 1),
@@ -732,8 +746,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   </button>
                 </div>
               )}
-
               <button
+                type="button"
                 onClick={() => {
                   setShowSearch(false);
                   setSearchQuery("");
@@ -747,7 +761,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
       </AnimatePresence>
 
-      {/* ── Messages ───────────────────────────────────────────────────── */}
+      {/* Messages */}
       <div
         ref={messagesContainerRef}
         onScroll={handleScroll}
@@ -759,28 +773,26 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        {messages && messages.length > 0 ? (
+        {messages.length > 0 ? (
           messages.map((msg, index) => {
             const prev = messages[index - 1];
             const showDate =
               index === 0 ||
               new Date(msg.createdAt).toDateString() !==
                 new Date(prev.createdAt).toDateString();
-
             const isOwn = msg.senderId === user?.id;
             const isSearchHit =
-              searchResults[searchIndex]?.id === msg.id && searchQuery;
+              searchResults[searchIndex]?.id === msg.id && !!searchQuery;
 
             return (
               <div key={msg.id}>
                 {showDate && (
                   <div className="my-4 flex justify-center">
-                    <span className="rounded-full border border-slate-200/80 bg-white/80 px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm backdrop-blur">
+                    <span className="rounded-full border border-slate-200/80 bg-white/80 px-3 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
                       {formatDateLabel(new Date(msg.createdAt))}
                     </span>
                   </div>
                 )}
-
                 <div
                   ref={isSearchHit ? searchHighlightRef : undefined}
                   className={`relative group ${
@@ -799,7 +811,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   {isSelectionMode && (
                     <div className="absolute left-1 top-1/2 z-10 -translate-y-1/2">
                       <div
-                        className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition ${
+                        className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${
                           selectedMessages.has(msg.id)
                             ? "border-indigo-600 bg-indigo-600 text-white"
                             : "border-slate-300 bg-white"
@@ -811,7 +823,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       </div>
                     </div>
                   )}
-
                   <div className={isSelectionMode ? "pl-8" : ""}>
                     <MessageBubble
                       message={msg}
@@ -824,12 +835,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       onDelete={() => handleDelete(msg.id)}
                       onPin={(pinned) => handlePin(msg.id, pinned)}
                       onReact={(emoji) => handleReact(msg.id, emoji)}
-                      isPinned={msg.isPinned}
+                      isPinned={!!msg.isPinned}
                       isSelected={selectedMessages.has(msg.id)}
                       isSelectionMode={isSelectionMode}
                     />
                   </div>
-
                   <AnimatePresence>
                     {showMessageActions === msg.id && (
                       <MessageContextMenu
@@ -863,28 +873,26 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </p>
           </div>
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Scroll to bottom ────────────────────────────────────────────── */}
+      {/* Scroll to bottom */}
       <AnimatePresence>
         {showScrollButton && (
           <motion.button
+            type="button"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            onClick={() =>
-              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-            }
-            className="absolute bottom-28 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white shadow-lg transition hover:shadow-xl"
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-28 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white shadow-lg"
           >
             <ChevronDown className="h-5 w-5 text-slate-600" />
           </motion.button>
         )}
       </AnimatePresence>
 
-      {/* ── Selection toolbar ──────────────────────────────────────────── */}
+      {/* Selection toolbar */}
       <AnimatePresence>
         {isSelectionMode && selectedMessages.size > 0 && (
           <motion.div
@@ -898,12 +906,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </span>
             <div className="flex items-center gap-1">
               <button
+                type="button"
                 onClick={() => toast.info("Forward coming soon")}
                 className="rounded-xl p-2 text-slate-600 hover:bg-slate-100"
               >
                 <Forward className="h-4 w-4" />
               </button>
               <button
+                type="button"
                 onClick={() => {
                   selectedMessages.forEach((id) => handleDelete(id));
                   exitSelection();
@@ -913,6 +923,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <Trash2 className="h-4 w-4" />
               </button>
               <button
+                type="button"
                 onClick={exitSelection}
                 className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"
               >
@@ -923,7 +934,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
       </AnimatePresence>
 
-      {/* ── Reply / Edit banners ───────────────────────────────────────── */}
+      {/* Reply / Edit banners */}
       <AnimatePresence>
         {(replyTo || editingMessage) && (
           <motion.div
@@ -959,6 +970,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => {
                   setReplyTo(null);
                   setEditingMessage(null);
@@ -972,41 +984,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
       </AnimatePresence>
 
-      {/* ── Recording indicator ────────────────────────────────────────── */}
-      <AnimatePresence>
-        {isRecording && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            className="mx-3 mb-2 flex items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-red-600"
-          >
-            <span className="relative flex h-3 w-3">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
-            </span>
-            <span className="text-sm font-medium">
-              Recording… {formatDuration(recordingDuration)}
-            </span>
-            <button
-              onClick={handleVoiceRecording}
-              className="ml-auto rounded-full bg-red-500 px-3 py-1 text-xs font-medium text-white"
-            >
-              Send
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Input ──────────────────────────────────────────────────────── */}
+      {/* Input — recording lives in MessageInput */}
       <div className="shrink-0 border-t border-slate-200/60 bg-white px-3 py-3">
         <MessageInput
           onSend={handleSend}
           onTyping={handleTyping}
-          onVoiceRecording={handleVoiceRecording}
-          isRecording={isRecording}
-          recordingDuration={recordingDuration}
-          editingMessage={editingMessage}
+          onVoiceRecording={handleVoiceBlob}
+          editingMessage={
+            editingMessage
+              ? { id: editingMessage.id, content: editingMessage.content || "" }
+              : null
+          }
           onCancelEdit={() => setEditingMessage(null)}
           isConnected={isConnected}
           onSelectMessages={() => {
@@ -1017,7 +1005,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         />
       </div>
 
-      {/* ── Typing indicator ───────────────────────────────────────────── */}
+      {/* Typing indicator */}
       <AnimatePresence>
         {typingUsers.size > 0 && (
           <motion.div
@@ -1039,7 +1027,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
       </AnimatePresence>
 
-      {/* ── Info sidebar ───────────────────────────────────────────────── */}
+      {/* Info sidebar */}
       <AnimatePresence>
         {showInfo && (
           <>
@@ -1060,13 +1048,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <h3 className="font-semibold text-slate-900">Chat info</h3>
                 <button
+                  type="button"
                   onClick={() => setShowInfo(false)}
                   className="rounded-xl p-2 hover:bg-slate-100"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-5">
                 <div className="mb-6 text-center">
                   <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-2xl font-bold text-white">
@@ -1083,7 +1071,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         : "Private chat"}
                   </p>
                 </div>
-
                 <div className="mb-6 grid grid-cols-3 gap-2">
                   {!isCommunity && !isGroup && (
                     <>
@@ -1103,7 +1090,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     onClick={() => setIsMuted((v) => !v)}
                   />
                 </div>
-
                 {isGroup && chat?.participants && (
                   <div>
                     <h5 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1142,7 +1128,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   );
 };
 
-// Small helper component
 const QuickAction = ({
   icon,
   label,
@@ -1153,6 +1138,7 @@ const QuickAction = ({
   onClick?: () => void;
 }) => (
   <button
+    type="button"
     onClick={onClick}
     className="flex flex-col items-center gap-1 rounded-xl bg-slate-50 py-3 transition hover:bg-slate-100"
   >
