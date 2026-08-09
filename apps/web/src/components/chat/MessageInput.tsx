@@ -9,23 +9,15 @@ import {
   Mic, 
   MicOff, 
   Check,
-  CheckCheck,
-  Clock,
   Edit,
   File,
   Video,
   Music,
   AtSign,
-  Hash,
-  Link as LinkIcon,
-  Calendar,
   MapPin,
-  Gift,
-  FolderOpen,
-  ImagePlus,
-  FilePlus,
   Circle,
   CircleCheck,
+  Clock,
 } from 'lucide-react';
 
 interface MessageInputProps {
@@ -81,7 +73,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [isTypingState, setIsTypingState] = useState(false);
-  const [showReconnect, setShowReconnect] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,28 +81,25 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const audioInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ✅ Handle connection status with delay
-  useEffect(() => {
-    console.log('🔌 MessageInput isConnected:', isConnected);
-    
-    if (!isConnected) {
-      // Show reconnecting message after 2 seconds of disconnection
-      const timer = setTimeout(() => {
-        setShowReconnect(true);
-      }, 2000);
-      return () => clearTimeout(timer);
-    } else {
-      setShowReconnect(false);
-    }
-  }, [isConnected]);
-
-  // Reset content when editing message changes
+  // ─── Sync content when editing starts / ends ─────────────────────────────
   useEffect(() => {
     if (editingMessage) {
-      setContent(editingMessage.content);
-      textareaRef.current?.focus();
+      // Start editing → fill textarea + clear any attachments
+      setContent(editingMessage.content || '');
+      setMediaPreview(null);
+      setFileAttachment(null);
+      setShowAttachmentMenu(false);
+      setShowEmojiPicker(false);
+
+      // Focus after a tiny delay so the layout has settled
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        // Move cursor to end
+        const len = editingMessage.content?.length || 0;
+        textareaRef.current?.setSelectionRange(len, len);
+      });
     }
-  }, [editingMessage]);
+  }, [editingMessage?.id]); // only when a *new* message starts being edited
 
   // Auto-resize textarea
   useEffect(() => {
@@ -152,6 +140,18 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, [isTypingState, onTyping, stopTyping]);
 
+  // ─── Cancel edit ─────────────────────────────────────────────────────────
+  const handleCancelEdit = useCallback(() => {
+    setContent('');
+    setMediaPreview(null);
+    setFileAttachment(null);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    onCancelEdit?.();
+  }, [onCancelEdit]);
+
+  // ─── Send / Confirm edit ─────────────────────────────────────────────────
   const handleSend = useCallback(() => {
     if (!content.trim() && !mediaPreview && !fileAttachment) return;
 
@@ -166,12 +166,15 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       messageType = 'FILE';
     }
 
+    // Parent (ChatWindow) decides whether this is an edit or a new message
     onSend(content.trim(), messageType, mediaUrl, fileUrl);
 
-    // Reset form
+    // Always reset local state after send/edit
     setContent('');
     setMediaPreview(null);
     setFileAttachment(null);
+    setShowAttachmentMenu(false);
+    setShowEmojiPicker(false);
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -189,18 +192,20 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       handleSend();
     }
     if (e.key === 'Escape' && editingMessage) {
-      onCancelEdit?.();
+      handleCancelEdit();
     }
-  }, [handleSend, editingMessage, onCancelEdit]);
+  }, [handleSend, editingMessage, handleCancelEdit]);
 
   const handleFileUpload = useCallback((
     e: React.ChangeEvent<HTMLInputElement>, 
     type: 'image' | 'video' | 'audio' | 'file'
   ) => {
+    // Disable file uploads while editing (edit is text-only)
+    if (editingMessage) return;
+
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file size (max 50MB)
     if (file.size > 50 * 1024 * 1024) {
       alert('File size exceeds 50MB limit');
       return;
@@ -208,7 +213,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
 
     setIsUploading(true);
     
-    // For files, create a URL for preview
     const url = URL.createObjectURL(file);
     
     if (type === 'image') {
@@ -228,12 +232,11 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     
     setIsUploading(false);
     setShowAttachmentMenu(false);
-  }, []);
+  }, [editingMessage]);
 
   const removeAttachment = useCallback(() => {
     setMediaPreview(null);
     setFileAttachment(null);
-    // Clear file inputs
     if (imageInputRef.current) imageInputRef.current.value = '';
     if (videoInputRef.current) videoInputRef.current.value = '';
     if (audioInputRef.current) audioInputRef.current.value = '';
@@ -252,17 +255,19 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }, []);
 
-  // Cleanup
+  // Cleanup object URLs
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
-      // Revoke object URLs
       if (mediaPreview?.url) URL.revokeObjectURL(mediaPreview.url);
       if (fileAttachment?.url) URL.revokeObjectURL(fileAttachment.url);
     };
   }, [mediaPreview, fileAttachment]);
+
+  const isEditMode = !!editingMessage;
+  const canSend = (content.trim() || mediaPreview || fileAttachment) && !isUploading && !isRecording && !isSelectionMode;
 
   return (
     <div className="space-y-2">
@@ -273,7 +278,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         accept="image/*"
         className="hidden"
         onChange={(e) => handleFileUpload(e, 'image')}
-        multiple={false}
       />
       <input
         type="file"
@@ -281,7 +285,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         accept="video/*"
         className="hidden"
         onChange={(e) => handleFileUpload(e, 'video')}
-        multiple={false}
       />
       <input
         type="file"
@@ -289,7 +292,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         accept="audio/*"
         className="hidden"
         onChange={(e) => handleFileUpload(e, 'audio')}
-        multiple={false}
       />
       <input
         type="file"
@@ -297,36 +299,25 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.csv,.json,.xml,.html"
         className="hidden"
         onChange={(e) => handleFileUpload(e, 'file')}
-        multiple={false}
       />
 
-      {/* ✅ Connection status - Only show after delay and when truly disconnected */}
-      {showReconnect && !isConnected && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl animate-pulse">
-          <Clock className="w-4 h-4 text-amber-500 animate-spin" />
+      {/* Connection status */}
+      {!isConnected && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+          <Clock className="w-4 h-4 text-amber-500 animate-pulse" />
           <span className="text-xs text-amber-700 font-medium">
-            Reconnecting... Messages will be sent when connection is restored
+            Reconnecting… Messages will be sent when connection is restored
           </span>
-          <button 
-            onClick={() => {
-              setShowReconnect(false);
-              // Force reconnection attempt
-              window.location.reload();
-            }}
-            className="ml-auto text-xs text-amber-600 hover:text-amber-800 font-medium underline"
-          >
-            Retry
-          </button>
         </div>
       )}
 
-      {/* Attachment Preview Bar */}
-      {(mediaPreview || fileAttachment || isUploading) && (
+      {/* Attachment Preview */}
+      {(mediaPreview || fileAttachment || isUploading) && !isEditMode && (
         <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200/80 rounded-2xl">
           {isUploading ? (
             <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Uploading attachment...</span>
+              <span>Uploading…</span>
             </div>
           ) : (
             <>
@@ -335,15 +326,12 @@ export const MessageInput: React.FC<MessageInputProps> = ({
                   {mediaPreview.type === 'image' ? (
                     <img
                       src={mediaPreview.url}
-                      alt="upload preview"
+                      alt="preview"
                       className="w-14 h-14 object-cover rounded-xl border border-slate-200"
                     />
                   ) : mediaPreview.type === 'video' ? (
                     <div className="w-14 h-14 bg-slate-800 rounded-xl flex items-center justify-center relative">
                       <Video className="w-6 h-6 text-white" />
-                      <span className="absolute bottom-0.5 right-0.5 text-[8px] text-white bg-black/50 px-1 rounded">
-                        Video
-                      </span>
                     </div>
                   ) : mediaPreview.type === 'audio' ? (
                     <div className="w-14 h-14 bg-indigo-100 rounded-xl flex items-center justify-center">
@@ -381,24 +369,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         </div>
       )}
 
-      {/* Editing indicator */}
-      {editingMessage && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl">
-          <Edit className="w-3.5 h-3.5 text-amber-600" />
-          <span className="text-xs text-amber-700 font-medium">
-            Editing message
-          </span>
-          <button
-            onClick={onCancelEdit}
-            className="ml-auto p-0.5 hover:bg-amber-200 rounded-lg transition-colors"
-          >
-            <X className="w-3.5 h-3.5 text-amber-600" />
-          </button>
-        </div>
-      )}
-
-      {/* Attachment menu */}
-      {showAttachmentMenu && (
+      {/* Attachment menu (disabled while editing) */}
+      {showAttachmentMenu && !isEditMode && (
         <div className="flex flex-wrap gap-1 p-2 bg-white border border-slate-200 rounded-xl shadow-lg">
           <button
             onClick={() => imageInputRef.current?.click()}
@@ -430,16 +402,13 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           </button>
           <button
             onClick={() => {
-              // Handle location sharing
               navigator.geolocation.getCurrentPosition(
                 (position) => {
                   const { latitude, longitude } = position.coords;
                   onSend(`📍 Location: ${latitude}, ${longitude}`, 'LOCATION');
                   setShowAttachmentMenu(false);
                 },
-                (error) => {
-                  alert('Unable to get location. Please enable location services.');
-                }
+                () => alert('Unable to get location.')
               );
             }}
             className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600 transition-colors"
@@ -449,7 +418,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           </button>
           <button
             onClick={() => {
-              // Handle contact sharing
               onSend('📇 Contact shared', 'CONTACT');
               setShowAttachmentMenu(false);
             }}
@@ -461,35 +429,45 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         </div>
       )}
 
-      {/* Main Input Control Bar */}
-      <div className="flex items-end gap-2 bg-white border border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 p-2 rounded-2xl transition-all shadow-sm">
+      {/* Main Input Bar */}
+      <div className={`flex items-end gap-2 bg-white border p-2 rounded-2xl transition-all shadow-sm ${
+        isEditMode 
+          ? 'border-amber-400 ring-2 ring-amber-400/20' 
+          : 'border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20'
+      }`}>
         {/* Left Actions */}
         <div className="flex items-center gap-0.5 pb-1">
-          {/* Attachment button */}
-          <button
-            type="button"
-            onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-xl transition-colors relative"
-            title="Attach file"
-          >
-            <Paperclip className="w-4 h-4" />
-            {showAttachmentMenu && (
-              <div className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full" />
-            )}
-          </button>
+          {!isEditMode && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
+                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-xl transition-colors"
+                title="Attach file"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
 
-          {/* Emoji button */}
-          <button
-            type="button"
-            onClick={() => {
-              setShowEmojiPicker(!showEmojiPicker);
-              onEmojiPickerToggle?.();
-            }}
-            className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-100 rounded-xl transition-colors"
-            title="Add emoji"
-          >
-            <Smile className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmojiPicker(!showEmojiPicker);
+                  onEmojiPickerToggle?.();
+                }}
+                className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-100 rounded-xl transition-colors"
+                title="Add emoji"
+              >
+                <Smile className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {isEditMode && (
+            <div className="flex items-center gap-1.5 px-2 text-amber-600">
+              <Edit className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-semibold">Editing</span>
+            </div>
+          )}
         </div>
 
         {/* Text Area */}
@@ -499,13 +477,13 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           onChange={(e) => handleTyping(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            editingMessage 
-              ? "Edit your message..." 
+            isEditMode 
+              ? "Edit your message… (Esc to cancel)" 
               : isRecording 
-                ? "Recording voice message..." 
+                ? "Recording voice message…" 
                 : isSelectionMode
-                  ? "Select messages to perform actions"
-                  : "Type a message... (Shift + Enter for new line)"
+                  ? "Select messages…"
+                  : "Type a message… (Shift + Enter for new line)"
           }
           rows={1}
           disabled={isRecording || isSelectionMode}
@@ -516,62 +494,72 @@ export const MessageInput: React.FC<MessageInputProps> = ({
 
         {/* Right Actions */}
         <div className="flex items-center gap-0.5 pb-1">
-          {/* Voice recording button */}
-          <button
-            type="button"
-            onClick={onVoiceRecording}
-            className={`p-2 rounded-xl transition-colors relative ${
-              isRecording 
-                ? 'bg-red-500 text-white animate-pulse' 
-                : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
-            }`}
-            title={isRecording ? 'Stop recording' : 'Voice message'}
-          >
-            {isRecording ? (
-              <>
-                <MicOff className="w-4 h-4" />
-                <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping" />
-              </>
-            ) : (
-              <Mic className="w-4 h-4" />
-            )}
-          </button>
+          {/* Cancel edit button */}
+          {isEditMode && (
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors"
+              title="Cancel edit (Esc)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
 
-          {/* Recording duration */}
+          {/* Voice recording (disabled while editing) */}
+          {!isEditMode && (
+            <button
+              type="button"
+              onClick={onVoiceRecording}
+              className={`p-2 rounded-xl transition-colors relative ${
+                isRecording 
+                  ? 'bg-red-500 text-white animate-pulse' 
+                  : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
+              }`}
+              title={isRecording ? 'Stop recording' : 'Voice message'}
+            >
+              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+          )}
+
           {isRecording && (
             <span className="text-xs font-mono text-red-500 font-bold min-w-[40px]">
               {formatDuration(recordingDuration)}
             </span>
           )}
 
-          {/* Selection mode toggle */}
-          <button
-            type="button"
-            onClick={onSelectMessages}
-            className={`p-2 rounded-xl transition-colors ${
-              isSelectionMode
-                ? 'bg-indigo-100 text-indigo-600'
-                : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
-            }`}
-            title={isSelectionMode ? 'Exit selection mode' : 'Select messages'}
-          >
-            {isSelectionMode ? <CircleCheck className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-          </button>
+          {/* Selection mode (disabled while editing) */}
+          {!isEditMode && (
+            <button
+              type="button"
+              onClick={onSelectMessages}
+              className={`p-2 rounded-xl transition-colors ${
+                isSelectionMode
+                  ? 'bg-indigo-100 text-indigo-600'
+                  : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'
+              }`}
+              title={isSelectionMode ? 'Exit selection' : 'Select messages'}
+            >
+              {isSelectionMode ? <CircleCheck className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
+            </button>
+          )}
 
-          {/* Send button */}
+          {/* Send / Confirm Edit button */}
           <button
             onClick={handleSend}
-            disabled={(!content.trim() && !mediaPreview && !fileAttachment) || isUploading || isRecording || isSelectionMode}
+            disabled={!canSend}
             className={`p-2.5 rounded-xl transition-all shadow-sm shrink-0 ${
-              (!content.trim() && !mediaPreview && !fileAttachment) || isUploading || isRecording || isSelectionMode
+              !canSend
                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white shadow-indigo-200/50'
+                : isEditMode
+                  ? 'bg-amber-500 hover:bg-amber-600 active:scale-95 text-white'
+                  : 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white shadow-indigo-200/50'
             }`}
-            title="Send message (Enter)"
+            title={isEditMode ? "Save edit (Enter)" : "Send message (Enter)"}
           >
             {isUploading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
-            ) : editingMessage ? (
+            ) : isEditMode ? (
               <Check className="w-4 h-4" />
             ) : (
               <Send className="w-4 h-4" />
@@ -580,8 +568,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         </div>
       </div>
 
-      {/* Quick emoji picker (simplified) */}
-      {showEmojiPicker && (
+      {/* Quick emoji picker */}
+      {showEmojiPicker && !isEditMode && (
         <div className="flex flex-wrap gap-1 p-2 bg-white border border-slate-200 rounded-xl shadow-lg">
           {['😊', '😂', '❤️', '🔥', '👍', '👏', '🙏', '🎉', '😍', '🤔', '😭', '🥺', '💯', '✨', '🌟', '🎊'].map((emoji) => (
             <button

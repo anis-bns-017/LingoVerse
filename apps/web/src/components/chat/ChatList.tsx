@@ -1,7 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
-import type { Chat } from '../../hooks/useChat';
+import React, { useMemo } from "react";
+import { useAuth } from "../../contexts/AuthContext";
+import type { Chat } from "../../hooks/useChat";
 import {
   Users,
   User,
@@ -12,16 +11,13 @@ import {
   MapPin,
   Pin,
   BellOff,
-  Search,
-  Plus,
-} from 'lucide-react';
+} from "lucide-react";
 
 interface ChatListProps {
   chats: Chat[];
   selectedChatId?: string;
   onSelectChat: (chatId: string) => void;
   onlineUserIds?: Set<string>;
-  onNewChat?: () => void;
 }
 
 function formatRelativeTime(dateStr: string) {
@@ -29,25 +25,28 @@ function formatRelativeTime(dateStr: string) {
   const diffMs = Date.now() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
 
-  if (diffMin < 1) return 'now';
+  if (diffMin < 1) return "now";
   if (diffMin < 60) return `${diffMin}m`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h`;
   const diffDay = Math.floor(diffHr / 24);
-  if (diffDay === 1) return 'Yesterday';
+  if (diffDay === 1) return "Yesterday";
   if (diffDay < 7) return `${diffDay}d`;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const MEDIA_PREVIEW: Record<string, { icon: React.ElementType; label: string }> = {
-  IMAGE: { icon: ImageIcon, label: 'Photo' },
-  VIDEO: { icon: ImageIcon, label: 'Video' },
-  AUDIO: { icon: Mic, label: 'Audio' },
-  VOICE_NOTE: { icon: Mic, label: 'Voice note' },
-  FILE: { icon: FileText, label: 'File' },
-  GIF: { icon: ImageIcon, label: 'GIF' },
-  STICKER: { icon: Sticker, label: 'Sticker' },
-  LOCATION: { icon: MapPin, label: 'Location' },
+const MEDIA_PREVIEW: Record<
+  string,
+  { icon: React.ElementType; label: string }
+> = {
+  IMAGE: { icon: ImageIcon, label: "Photo" },
+  VIDEO: { icon: ImageIcon, label: "Video" },
+  AUDIO: { icon: Mic, label: "Audio" },
+  VOICE_NOTE: { icon: Mic, label: "Voice note" },
+  FILE: { icon: FileText, label: "File" },
+  GIF: { icon: ImageIcon, label: "GIF" },
+  STICKER: { icon: Sticker, label: "Sticker" },
+  LOCATION: { icon: MapPin, label: "Location" },
 };
 
 export const ChatList: React.FC<ChatListProps> = ({
@@ -55,19 +54,8 @@ export const ChatList: React.FC<ChatListProps> = ({
   selectedChatId,
   onSelectChat,
   onlineUserIds,
-  onNewChat,
 }) => {
   const { user } = useAuth();
-  const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-
-  const handleStartNewChat = () => {
-    if (onNewChat) {
-      onNewChat();
-    } else {
-      navigate('/chat/new');
-    }
-  };
 
   const getOtherParticipant = (chat: Chat) => {
     return chat.participants?.find((p) => p.userId !== user?.id)?.user;
@@ -78,15 +66,15 @@ export const ChatList: React.FC<ChatListProps> = ({
   };
 
   const getChatName = (chat: Chat) => {
-    if (chat.type === 'PRIVATE') {
+    if (chat.type === "PRIVATE") {
       const otherUser = getOtherParticipant(chat);
-      return otherUser?.name || 'Unknown User';
+      return otherUser?.name || "Unknown User";
     }
-    return chat.name || 'Group Chat';
+    return chat.name || "Group Chat";
   };
 
   const getChatAvatar = (chat: Chat) => {
-    if (chat.type === 'PRIVATE') {
+    if (chat.type === "PRIVATE") {
       const otherUser = getOtherParticipant(chat);
       return otherUser?.avatarUrl;
     }
@@ -94,7 +82,7 @@ export const ChatList: React.FC<ChatListProps> = ({
   };
 
   const isOnline = (chat: Chat) => {
-    if (chat.type !== 'PRIVATE' || !onlineUserIds) return false;
+    if (chat.type !== "PRIVATE" || !onlineUserIds) return false;
     const other = getOtherParticipant(chat);
     return other ? onlineUserIds.has(other.id) : false;
   };
@@ -114,11 +102,11 @@ export const ChatList: React.FC<ChatListProps> = ({
     if (msg.isDeleted) return <span className="italic">Message deleted</span>;
 
     const prefix =
-      chat.type !== 'PRIVATE' && msg.senderId !== user?.id
-        ? `${msg.sender?.name?.split(' ')[0] || 'Someone'}: `
+      chat.type !== "PRIVATE" && msg.senderId !== user?.id
+        ? `${msg.sender?.name?.split(" ")[0] || "Someone"}: `
         : msg.senderId === user?.id
-        ? 'You: '
-        : '';
+          ? "You: "
+          : "";
 
     if (msg.content) {
       return (
@@ -140,65 +128,29 @@ export const ChatList: React.FC<ChatListProps> = ({
     );
   };
 
-  const sortedFilteredChats = useMemo(() => {
-    const filtered = chats.filter((chat) => {
-      if (!search.trim()) return true;
-      return getChatName(chat).toLowerCase().includes(search.trim().toLowerCase());
-    });
-
-    return [...filtered].sort((a, b) => {
+  // Sort only (filtering is already done in ChatPage)
+  const sortedChats = useMemo(() => {
+    return [...chats].sort((a, b) => {
       const aPinned = getMyParticipant(a)?.isPinned ? 1 : 0;
       const bPinned = getMyParticipant(b)?.isPinned ? 1 : 0;
       if (aPinned !== bPinned) return bPinned - aPinned;
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chats, search, user?.id]);
+  }, [chats, user?.id]);
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Search + new chat header */}
-      <div className="p-3 pb-2 flex items-center gap-2 shrink-0">
-        <div className="relative flex-1">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search chats"
-            className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none text-xs transition-all"
-          />
+    <div className="flex-1 p-3 pt-1 space-y-1.5 overflow-y-auto custom-scrollbar">
+      {sortedChats.length === 0 ? (
+        <div className="text-center py-10 text-xs text-slate-400">
+          <p>No conversations yet</p>
         </div>
-        <button
-          onClick={handleStartNewChat}
-          className="shrink-0 w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-colors"
-          title="New chat"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Chat items list */}
-      <div className="flex-1 p-3 pt-1 space-y-1.5 overflow-y-auto custom-scrollbar">
-        {sortedFilteredChats.length === 0 && (
-          <div className="text-center py-10 text-xs text-slate-400">
-            <p>{search ? 'No chats match your search' : 'No conversations yet'}</p>
-            {!search && (
-              <button
-                onClick={handleStartNewChat}
-                className="mt-2 text-indigo-600 hover:text-indigo-700 font-medium text-xs transition-colors"
-              >
-                Start a new conversation →
-              </button>
-            )}
-          </div>
-        )}
-
-        {sortedFilteredChats.map((chat) => {
+      ) : (
+        sortedChats.map((chat) => {
           const isSelected = selectedChatId === chat.id;
           const avatarUrl = getChatAvatar(chat);
           const name = getChatName(chat);
-          const isGroup = chat.type !== 'PRIVATE';
+          const isGroup = chat.type !== "PRIVATE";
           const online = isOnline(chat);
           const unread = isUnread(chat);
           const me = getMyParticipant(chat);
@@ -210,8 +162,8 @@ export const ChatList: React.FC<ChatListProps> = ({
               onClick={() => onSelectChat(chat.id)}
               className={`group relative p-3 rounded-2xl cursor-pointer transition-all flex items-center gap-3.5 border ${
                 isSelected
-                  ? 'bg-indigo-50/70 border-indigo-100 shadow-sm'
-                  : 'bg-white hover:bg-slate-50 border-transparent hover:border-slate-100'
+                  ? "bg-indigo-50/70 border-indigo-100 shadow-sm"
+                  : "bg-white hover:bg-slate-50 border-transparent hover:border-slate-100"
               }`}
             >
               {isSelected && (
@@ -230,8 +182,8 @@ export const ChatList: React.FC<ChatListProps> = ({
                   <div
                     className={`w-12 h-12 rounded-2xl font-bold text-base flex items-center justify-center border transition-all ${
                       isSelected
-                        ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'bg-gradient-to-br from-slate-100 to-slate-200 text-slate-700 border-slate-200/60'
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-gradient-to-br from-slate-100 to-slate-200 text-slate-700 border-slate-200/60"
                     }`}
                   >
                     {name.charAt(0).toUpperCase()}
@@ -241,11 +193,15 @@ export const ChatList: React.FC<ChatListProps> = ({
                 <div
                   className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-lg flex items-center justify-center text-[10px] border shadow-xs ${
                     isGroup
-                      ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                      : 'bg-white text-slate-500 border-slate-100'
+                      ? "bg-indigo-100 text-indigo-700 border-indigo-200"
+                      : "bg-white text-slate-500 border-slate-100"
                   }`}
                 >
-                  {isGroup ? <Users className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                  {isGroup ? (
+                    <Users className="w-3 h-3" />
+                  ) : (
+                    <User className="w-3 h-3" />
+                  )}
                 </div>
 
                 {online && (
@@ -257,20 +213,26 @@ export const ChatList: React.FC<ChatListProps> = ({
               <div className="flex-1 min-w-0 space-y-0.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1 min-w-0">
-                    {me?.isPinned && <Pin className="w-3 h-3 text-indigo-400 shrink-0" />}
+                    {me?.isPinned && (
+                      <Pin className="w-3 h-3 text-indigo-400 shrink-0" />
+                    )}
                     <h4
                       className={`font-bold text-xs truncate transition-colors ${
-                        isSelected ? 'text-indigo-950' : 'text-slate-800'
+                        isSelected ? "text-indigo-950" : "text-slate-800"
                       }`}
                     >
                       {name}
                     </h4>
-                    {me?.isMuted && <BellOff className="w-3 h-3 text-slate-300 shrink-0" />}
+                    {me?.isMuted && (
+                      <BellOff className="w-3 h-3 text-slate-300 shrink-0" />
+                    )}
                   </div>
                   {lastMsg && (
                     <span
                       className={`text-[10px] shrink-0 ${
-                        unread ? 'text-indigo-600 font-semibold' : 'text-slate-400'
+                        unread
+                          ? "text-indigo-600 font-semibold"
+                          : "text-slate-400"
                       }`}
                     >
                       {formatRelativeTime(lastMsg.createdAt)}
@@ -282,21 +244,20 @@ export const ChatList: React.FC<ChatListProps> = ({
                   <div
                     className={`text-xs truncate flex-1 transition-colors ${
                       unread
-                        ? 'text-slate-700 font-medium'
+                        ? "text-slate-700 font-medium"
                         : isSelected
-                        ? 'text-indigo-700/80 font-medium'
-                        : 'text-slate-400'
+                          ? "text-indigo-700/80 font-medium"
+                          : "text-slate-400"
                     }`}
                   >
                     {renderLastMessage(chat)}
                   </div>
 
-                  {/* Unread Indicator Badge */}
                   {unread && (
                     <div className="shrink-0 flex items-center justify-center">
                       {chat.unreadCount && chat.unreadCount > 0 ? (
                         <span className="px-1.5 py-0.5 text-[10px] font-bold text-white bg-indigo-600 rounded-full min-w-[1.25rem] text-center leading-none">
-                          {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                          {chat.unreadCount > 99 ? "99+" : chat.unreadCount}
                         </span>
                       ) : (
                         <span className="w-2 h-2 rounded-full bg-indigo-600" />
@@ -307,8 +268,8 @@ export const ChatList: React.FC<ChatListProps> = ({
               </div>
             </div>
           );
-        })}
-      </div>
+        })
+      )}
     </div>
   );
 };
