@@ -405,11 +405,11 @@ export class ChatService {
       data: {
         chatId: chatId!,
         senderId: userId,
-        content,
-        type: (type as MessageType) || MessageType.TEXT,
-        mediaUrl,
-        fileUrl,
-        replyToId,
+        content: content || 'Voice message',
+        type: (type as MessageType) || MessageType.VOICE_NOTE,
+        mediaUrl: mediaUrl || null,
+        fileUrl: fileUrl || null,
+        replyToId: replyToId || null,
       },
       include: {
         sender: {

@@ -904,14 +904,21 @@ model CommunityRole {
 }
 
 model VoiceRoomMessage {
-  id        String    @id @default(cuid())
+  id        String            @id @default(cuid())
   roomId    String
-  room      VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room      VoiceRoom         @relation(fields: [roomId], references: [id], onDelete: Cascade)
   senderId  String
-  sender    User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  sender    User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
   content   String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  type      String            @default("TEXT") // 👈 ADD THIS
+  mediaUrl  String?
+  fileUrl   String?
+  replyToId String?
+  replyTo   VoiceRoomMessage? @relation("VoiceMessageReply", fields: [replyToId], references: [id])
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  replies VoiceRoomMessage[] @relation("VoiceMessageReply")
 
   @@index([roomId])
   @@index([senderId])

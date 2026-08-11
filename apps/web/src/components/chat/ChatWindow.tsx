@@ -147,7 +147,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     typingUsers,
     onlineUsers,
     sendMessage: sendSocketMessage,
-    sendVoiceMessage: sendSocketVoiceMessage,
     sendTyping,
     emitRead,
     deleteMessage: deleteSocketMessage,
@@ -335,58 +334,83 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     ],
   );
 
+  
   // ─── Voice from MessageInput (blob + duration) ───────────────────────────
   const handleVoiceBlob = useCallback(
-    (blob: Blob, duration: number) => {
+    async (blob: Blob, duration: number) => {
       if (!blob || blob.size === 0) {
         toast.error("Empty recording");
         return;
       }
 
-      const audioUrl = URL.createObjectURL(blob);
-      const payload = {
-        content: "",
-        type: "VOICE_NOTE",
-        mediaUrl: audioUrl,
-        audioUrl,
-        duration: Math.max(1, Math.floor(duration || 1)),
-        replyToId: replyTo?.id,
-      };
+      if (blob.size > 5 * 1024 * 1024) {
+        toast.error("Voice message too large (max 5MB)");
+        return;
+      }
 
       try {
+        // ✅ Upload file to server
+        const formData = new FormData();
+        formData.append("file", blob, `voice-${Date.now()}.webm`);
+
+        const uploadRes = await fetch(
+          "http://localhost:3000/voice/upload-audio",
+          {
+            method: "POST",
+            credentials: "include",
+            body: formData,
+          },
+        );
+
+        if (!uploadRes.ok) {
+          const errorData = await uploadRes.json().catch(() => ({}));
+          throw new Error(errorData.message || "Upload failed");
+        }
+
+        const uploadData = await uploadRes.json();
+        const mediaUrl = uploadData.url;
+
+        if (!mediaUrl) {
+          throw new Error("Upload response missing url");
+        }
+
+        // ✅ Send message with permanent URL
+        const payload = {
+          content: "Voice message",
+          type: "VOICE_NOTE" as const,
+          mediaUrl: mediaUrl,
+          fileUrl: mediaUrl,
+          duration: Math.max(1, Math.floor(duration || 1)),
+          replyToId: replyTo?.id,
+        };
+
+        // ✅ Send via WebSocket or REST
         if (socket?.connected) {
-          if (typeof sendSocketVoiceMessage === "function") {
-            sendSocketVoiceMessage(
-              isCommunity
-                ? { communityId, ...payload }
-                : { chatId, ...payload },
-            );
-          } else {
-            sendSocketMessage(
-              isCommunity
-                ? { communityId, ...payload }
-                : { chatId, ...payload },
-            );
-          }
+          sendSocketMessage(
+            isCommunity ? { communityId, ...payload } : { chatId, ...payload },
+          );
         } else if (isCommunity) {
-          sendCommunityMessageRest.mutate({
+          await sendCommunityMessageRest.mutateAsync({
             communityId: communityId!,
             ...payload,
           });
         } else {
-          sendMessageRest.mutate({ chatId: chatId!, ...payload });
+          await sendMessageRest.mutateAsync({
+            chatId: chatId!,
+            ...payload,
+          });
         }
 
         toast.success("Voice message sent");
         setReplyTo(null);
         setTimeout(() => scrollToBottom(true), 50);
-      } catch {
-        toast.error("Failed to send voice message");
+      } catch (err: any) {
+        console.error("Voice upload error:", err);
+        toast.error(err.message || "Failed to send voice message");
       }
     },
     [
       socket,
-      sendSocketVoiceMessage,
       sendSocketMessage,
       isCommunity,
       communityId,

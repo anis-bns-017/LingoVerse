@@ -63,6 +63,11 @@ function buildWaveform(seed: number): number[] {
   });
 }
 
+// Helper to check if URL is a blob URL
+function isBlobUrl(url: string): boolean {
+  return url?.startsWith("blob:") || false;
+}
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   isOwn,
@@ -113,24 +118,55 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isAudio = message.type === "AUDIO";
   const isGif = message.type === "GIF";
 
+  const typedMessage = message as Message & {
+    audioUrl?: string;
+    duration?: number;
+  };
+
   const mediaSrc =
     message.mediaUrl ||
-    (message as any).audioUrl ||
+    typedMessage.audioUrl ||
     message.fileUrl ||
     message.attachments?.[0]?.url ||
     "";
 
   const showVoicePlayer = (isVoiceNote || isAudio) && !!mediaSrc;
-  const messageDuration = duration || (message as any).duration || 0;
+  const messageDuration = duration || typedMessage.duration || 0;
 
   // Reset player UI when src changes — DO NOT revoke message blob URLs
   useEffect(() => {
     setProgress(0);
     setIsPlaying(false);
     setLoadError(false);
-    setDuration(typeof (message as any).duration === "number" ? (message as any).duration : 0);
+    setDuration(
+      typeof typedMessage.duration === "number" ? typedMessage.duration : 0,
+    );
     setIsLoading(false);
-  }, [mediaSrc, message]);
+  }, [mediaSrc, typedMessage.duration]);
+
+  // Debug log for voice messages
+  useEffect(() => {
+    if (message.type === "VOICE_NOTE" || message.type === "AUDIO") {
+      console.log("VOICE DEBUG", {
+        id: message.id,
+        type: message.type,
+        mediaUrl: message.mediaUrl,
+        fileUrl: message.fileUrl,
+        audioUrl: typedMessage.audioUrl,
+        duration: typedMessage.duration,
+        mediaSrc,
+        isBlob: isBlobUrl(mediaSrc),
+      });
+    }
+  }, [
+    message.id,
+    message.type,
+    message.mediaUrl,
+    message.fileUrl,
+    typedMessage.audioUrl,
+    typedMessage.duration,
+    mediaSrc,
+  ]);
 
   // Wire audio element
   useEffect(() => {
@@ -244,7 +280,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       if (!el) return;
 
       const rect = el.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      const ratio = Math.min(
+        1,
+        Math.max(0, (clientX - rect.left) / rect.width),
+      );
       setProgress(ratio);
 
       const d =
@@ -445,7 +484,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </AnimatePresence>
 
         {isSticker && mediaSrc ? (
-          <img src={mediaSrc} alt="sticker" className="w-32 h-32 object-contain" />
+          <img
+            src={mediaSrc}
+            alt="sticker"
+            className="w-32 h-32 object-contain"
+          />
         ) : isGif && mediaSrc ? (
           <img
             src={mediaSrc}
@@ -486,18 +529,47 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               </div>
             )}
 
+            {/* ✅ UPDATED: Voice player with better error handling */}
             {showVoicePlayer ? (
               <div
                 className={`flex items-center gap-2.5 min-w-[220px] max-w-[300px] p-2.5 rounded-2xl ${
                   isOwn ? "bg-indigo-700/55" : "bg-slate-100"
                 }`}
               >
-                <audio ref={audioRef} preload="metadata" playsInline />
+                <audio
+                  ref={audioRef}
+                  preload="metadata"
+                  playsInline
+                  onError={(e) => {
+                    console.error("Audio error:", e);
+                    setLoadError(true);
+                    setIsPlaying(false);
+                    setIsLoading(false);
+                  }}
+                  onLoadedData={() => {
+                    setLoadError(false);
+                    setIsLoading(false);
+                    if (audioRef.current) {
+                      setDuration(audioRef.current.duration || 0);
+                    }
+                  }}
+                  onCanPlay={() => {
+                    setLoadError(false);
+                    setIsLoading(false);
+                  }}
+                >
+                  {/* ✅ Use <source> element for better error handling */}
+                  <source src={mediaSrc} type="audio/webm" />
+                  <source src={mediaSrc} type="audio/mp3" />
+                  <source src={mediaSrc} type="audio/wav" />
+                  Your browser does not support the audio element.
+                </audio>
 
                 <button
                   type="button"
                   onClick={togglePlay}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                  disabled={loadError || !mediaSrc}
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40 ${
                     isOwn
                       ? "bg-white text-indigo-600 shadow-sm"
                       : "bg-indigo-600 text-white shadow-sm"
@@ -525,7 +597,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     {waveform.map((level, i) => (
                       <div
                         key={i}
-                        className={`flex-1 min-w-[2px] max-w-[4px] rounded-full pointer-events-none ${
+                        className={`flex-1 min-w-[2px] max-w-[4px] rounded-full pointer-events-none transition-all duration-150 ${
                           i < playedBars
                             ? isOwn
                               ? "bg-white"
@@ -556,11 +628,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           setLoadError(false);
                           setIsLoading(true);
                           if (audioRef.current) {
-                            audioRef.current.src = mediaSrc;
                             audioRef.current.load();
                           }
                         }}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-red-500/20 hover:bg-red-500/30 rounded-full"
+                        className="flex items-center gap-1 px-2 py-0.5 bg-red-500/20 hover:bg-red-500/30 rounded-full transition-colors"
                       >
                         <RefreshCw className="w-3 h-3" />
                         Retry

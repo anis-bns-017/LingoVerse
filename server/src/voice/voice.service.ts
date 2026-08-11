@@ -134,6 +134,9 @@ export class VoiceService {
         creator: {
           select: { id: true, name: true, avatarUrl: true },
         },
+        _count: {
+          select: { participants: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -465,7 +468,7 @@ export class VoiceService {
     });
   }
 
-  // ============ VOICE ROOM MESSAGES (USING VOICEROOMMESSAGE) ============
+  // ============ VOICE ROOM MESSAGES ============
 
   async getVoiceRoomMessages(
     userId: string,
@@ -555,6 +558,10 @@ export class VoiceService {
         roomId: roomId,
         senderId: userId,
         content,
+        type,
+        mediaUrl,
+        fileUrl,
+        replyToId,
       },
       include: {
         sender: {
@@ -639,7 +646,7 @@ export class VoiceService {
       where: {
         roomId_userId: { roomId, userId: newHostId },
       },
-      data: { role: 'MODERATOR' },
+      data: { role: 'SPEAKER' },
     });
 
     await this.prisma.voiceParticipant.update({
@@ -713,6 +720,112 @@ export class VoiceService {
           },
         },
       },
+    });
+  }
+
+  // ============ PARTICIPANT MUTE/UNMUTE ============
+
+  async muteParticipant(userId: string, roomId: string, targetUserId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+      include: { participants: true },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+
+    const isCreator = room.creatorId === userId;
+    const isModerator = room.participants.some(
+      (p) => p.userId === userId && p.role === 'MODERATOR',
+    );
+    if (!isCreator && !isModerator) {
+      throw new ForbiddenException(
+        'Only creator or moderator can mute participants',
+      );
+    }
+
+    const participant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: { roomId, userId: targetUserId },
+      },
+    });
+    if (!participant) throw new NotFoundException('Participant not found');
+
+    if (targetUserId === room.creatorId) {
+      throw new ForbiddenException('Cannot mute the host');
+    }
+
+    return this.prisma.voiceParticipant.update({
+      where: { id: participant.id },
+      data: { isMuted: true },
+    });
+  }
+
+  async unmuteParticipant(
+    userId: string,
+    roomId: string,
+    targetUserId: string,
+  ) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+      include: { participants: true },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+
+    const isCreator = room.creatorId === userId;
+    const isModerator = room.participants.some(
+      (p) => p.userId === userId && p.role === 'MODERATOR',
+    );
+    if (!isCreator && !isModerator) {
+      throw new ForbiddenException(
+        'Only creator or moderator can unmute participants',
+      );
+    }
+
+    const participant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: { roomId, userId: targetUserId },
+      },
+    });
+    if (!participant) throw new NotFoundException('Participant not found');
+
+    return this.prisma.voiceParticipant.update({
+      where: { id: participant.id },
+      data: { isMuted: false },
+    });
+  }
+
+  // ============ KICK PARTICIPANT ============
+
+  async kickParticipant(userId: string, roomId: string, targetUserId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+      include: { participants: true },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+
+    const isCreator = room.creatorId === userId;
+    const isModerator = room.participants.some(
+      (p) => p.userId === userId && p.role === 'MODERATOR',
+    );
+    if (!isCreator && !isModerator) {
+      throw new ForbiddenException(
+        'Only creator or moderator can kick participants',
+      );
+    }
+
+    if (targetUserId === room.creatorId) {
+      throw new ForbiddenException('Cannot kick the host');
+    }
+
+    const participant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: { roomId, userId: targetUserId },
+      },
+    });
+    if (!participant) throw new NotFoundException('Participant not found');
+
+    return this.prisma.voiceParticipant.update({
+      where: { id: participant.id },
+      data: { leftAt: new Date() },
     });
   }
 }

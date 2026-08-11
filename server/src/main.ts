@@ -3,6 +3,9 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import * as express from 'express'; // ✅ Add this import
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -10,6 +13,16 @@ async function bootstrap() {
   const config = app.get(ConfigService);
 
   app.use(cookieParser());
+
+  // ✅ Ensure uploads directory exists
+  const uploadsDir = join(process.cwd(), 'uploads', 'audio');
+  if (!existsSync(uploadsDir)) {
+    mkdirSync(uploadsDir, { recursive: true });
+    console.log(`📁 Created uploads directory: ${uploadsDir}`);
+  }
+
+  // ✅ CORRECT WAY: Use express.static with app.use()
+  app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -19,7 +32,6 @@ async function bootstrap() {
     }),
   );
 
-  // ✅ Enhanced CORS configuration for WebSocket support
   app.enableCors({
     origin: config.get<string[]>('CORS_ORIGIN') ?? [
       'http://localhost:3000',
@@ -31,9 +43,9 @@ async function bootstrap() {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
-      'Content-Type', 
-      'Authorization', 
-      'Cookie', 
+      'Content-Type',
+      'Authorization',
+      'Cookie',
       'Accept',
       'X-Requested-With',
     ],
@@ -44,6 +56,7 @@ async function bootstrap() {
   await app.listen(port);
   console.log(`🚀 Server running on http://localhost:${port}`);
   console.log(`🔌 WebSocket endpoint: ws://localhost:${port}/chat`);
+  console.log(`📁 Static files served from: /uploads/`);
 }
 
 bootstrap();

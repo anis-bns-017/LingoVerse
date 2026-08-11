@@ -22,6 +22,7 @@ import {
   Pause,
   Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface MessageInputProps {
   onSend: (
@@ -31,7 +32,6 @@ interface MessageInputProps {
     fileUrl?: string,
   ) => void;
   onTyping?: (isTyping: boolean) => void;
-  /** Called when user finishes a voice note and hits send */
   onVoiceRecording?: (blob: Blob, duration: number) => void;
   editingMessage?: { id: string; content: string } | null;
   onCancelEdit?: () => void;
@@ -39,10 +39,15 @@ interface MessageInputProps {
   onEmojiPickerToggle?: () => void;
   onSelectMessages?: () => void;
   isSelectionMode?: boolean;
-  // Optional – ignored if recording is owned here (kept for backward compat)
   isRecording?: boolean;
   recordingDuration?: number;
 }
+
+const BAR_COUNT = 32;
+
+// ✅ Cloudinary upload preset - you need to create this in Cloudinary dashboard
+const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ; // Create this in Cloudinary
+const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME; // Replace with your cloud name
 
 export const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
@@ -72,7 +77,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [isTypingState, setIsTypingState] = useState(false);
 
-  // Recording (owned by this component)
+  // Recording
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
@@ -80,6 +85,10 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioProgress, setAudioProgress] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
+  const [audioLevels, setAudioLevels] = useState<number[]>(
+    Array(BAR_COUNT).fill(0.08),
+  );
+  const [isUploadingVoice, setIsUploadingVoice] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -95,7 +104,30 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // ─── Recording ───────────────────────────────────────────────────────────
+  // Visualizer
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const smoothLevelsRef = useRef<number[]>(Array(BAR_COUNT).fill(0.08));
+
+  const getSupportedMimeType = () => {
+    const types = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+    ];
+    for (const type of types) {
+      if (
+        typeof MediaRecorder !== "undefined" &&
+        MediaRecorder.isTypeSupported(type)
+      ) {
+        return type;
+      }
+    }
+    return "";
+  };
+
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -108,6 +140,113 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   };
 
+  // ─── Live spectrum (while recording) ─────────────────────────────────────
+  const stopVisualizer = useCallback(() => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    smoothLevelsRef.current = Array(BAR_COUNT).fill(0.08);
+    setAudioLevels(Array(BAR_COUNT).fill(0.08));
+  }, []);
+
+  const startVisualizer = useCallback((stream: MediaStream) => {
+    try {
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.85;
+      source.connect(analyser);
+
+      audioContextRef.current = ctx;
+      analyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const usable = Math.floor(data.length * 0.5);
+
+      const tick = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(data);
+
+        const next: number[] = [];
+        for (let i = 0; i < BAR_COUNT; i++) {
+          const idx = Math.floor((i / BAR_COUNT) * usable);
+          const raw = Math.pow((data[idx] || 0) / 255, 0.65);
+          next.push(Math.max(0.06, Math.min(1, raw)));
+        }
+
+        const prev = smoothLevelsRef.current;
+        const smoothed = next.map((v, i) => {
+          const p = prev[i] ?? 0.08;
+          return p + (v - p) * 0.3;
+        });
+        smoothLevelsRef.current = smoothed;
+        setAudioLevels([...smoothed]);
+        animFrameRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {
+      /* visualizer optional */
+    }
+  }, []);
+
+  // ─── Upload voice to Cloudinary ───────────────────────────────────────────
+  const uploadVoiceToCloudinary = useCallback(
+    async (blob: Blob, duration: number): Promise<string | null> => {
+      setIsUploadingVoice(true);
+      try {
+        console.log("📤 Starting voice upload...");
+        console.log("📁 Blob size:", blob.size, "bytes");
+        console.log("📁 Blob type:", blob.type);
+
+        // ✅ FIX: Use Blob directly, not File constructor
+        const formData = new FormData();
+        // ✅ Append as blob with filename - this works everywhere
+        formData.append("file", blob, `voice-${Date.now()}.webm`);
+        formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+        formData.append("resource_type", "video");
+
+        const uploadUrl = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`;
+        console.log("🌐 Upload URL:", uploadUrl);
+
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          body: formData,
+        });
+
+        console.log("📡 Response status:", response.status);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error("❌ Cloudinary error:", errorData);
+          throw new Error(
+            errorData.error?.message || `Upload failed: ${response.status}`,
+          );
+        }
+
+        const data = await response.json();
+        console.log("✅ Upload successful!");
+        console.log("🔗 Audio URL:", data.secure_url);
+
+        return data.secure_url;
+      } catch (error: any) {
+        console.error("❌ Voice upload error:", error);
+        console.error("❌ Error details:", error.message);
+        return null;
+      } finally {
+        setIsUploadingVoice(false);
+      }
+    },
+    [],
+  );
+
+  // ─── Recording ───────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -119,12 +258,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       });
       streamRef.current = stream;
 
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "";
-
+      const mime = getSupportedMimeType();
       const mediaRecorder = mime
         ? new MediaRecorder(stream, { mimeType: mime })
         : new MediaRecorder(stream);
@@ -136,14 +270,14 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
+        const finalDuration = recordingDurationRef.current;
         clearRecordingTimer();
+        stopVisualizer();
         stopTracks();
 
-        const blob = new Blob(audioChunksRef.current, {
-          type: mediaRecorder.mimeType || "audio/webm",
-        });
-        const durationSec = recordingDurationRef.current;
+        const blobType = mediaRecorder.mimeType || mime || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type: blobType });
 
         setRecordingBlob(blob);
         setRecordingDuration(0);
@@ -162,16 +296,26 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           name: "Voice message",
         });
 
-        // Prefer duration from audio metadata when available
-        const audio = new Audio(url);
-        audio.onloadedmetadata = () => {
-          if (isFinite(audio.duration) && audio.duration > 0) {
-            setAudioDuration(audio.duration);
-          } else {
-            setAudioDuration(durationSec);
-          }
-        };
-        audio.onerror = () => setAudioDuration(durationSec);
+        const dur = Math.max(1, finalDuration || 1);
+        setAudioDuration(dur);
+        setAudioProgress(0);
+
+        // ✅ TRY TO UPLOAD - BUT DO NOT AUTO-SEND
+        // Just upload and store the URL, let user click send
+        const uploadedUrl = await uploadVoiceToCloudinary(blob, dur);
+
+        if (uploadedUrl) {
+          // ✅ Store the uploaded URL in the preview
+          setMediaPreview((prev) =>
+            prev ? { ...prev, url: uploadedUrl } : null,
+          );
+          // ✅ Update the preview audio URL to play from Cloudinary
+          setPreviewAudioUrl(uploadedUrl);
+          toast.success("Voice uploaded! Tap send to share.");
+        } else {
+          // ❌ Upload failed - keep local preview for retry
+          toast.error("Upload failed. Tap send to retry.");
+        }
       };
 
       mediaRecorder.start(100);
@@ -180,6 +324,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       recordingDurationRef.current = 0;
       setRecordingBlob(null);
       setAudioProgress(0);
+      setIsPlaying(false);
+
+      startVisualizer(stream);
 
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((d) => {
@@ -190,21 +337,34 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       }, 1000);
     } catch (err) {
       console.error("Microphone error:", err);
-      alert(
-        "Unable to access microphone. Please allow microphone permissions.",
+      toast.error(
+        "Unable to access microphone. Please check permissions in your browser settings.",
       );
-    }
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === "recording") {
-      mediaRecorderRef.current.stop();
-    } else {
-      clearRecordingTimer();
+      stopVisualizer();
       stopTracks();
       setIsRecording(false);
     }
-  }, []);
+  }, [
+    startVisualizer,
+    stopVisualizer,
+    uploadVoiceToCloudinary,
+    onSend,
+    onVoiceRecording,
+  ]);
+
+  const stopRecording = useCallback(() => {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    } else {
+      clearRecordingTimer();
+      stopVisualizer();
+      stopTracks();
+      setIsRecording(false);
+    }
+  }, [stopVisualizer]);
 
   const toggleRecording = useCallback(() => {
     if (isRecording) stopRecording();
@@ -212,6 +372,10 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   }, [isRecording, startRecording, stopRecording]);
 
   const discardRecording = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
     if (previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
     setPreviewAudioUrl(null);
     setRecordingBlob(null);
@@ -219,30 +383,36 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     setAudioDuration(0);
     setAudioProgress(0);
     setIsPlaying(false);
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
   }, [previewAudioUrl]);
 
-  // ─── Preview playback ────────────────────────────────────────────────────
+  const activeAudioUrl =
+    previewAudioUrl ||
+    (mediaPreview?.type === "audio" ? mediaPreview.url : null);
+
+  // ─── Preview playback (progress bar) ─────────────────────────────────────
   const togglePlayback = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || !previewAudioUrl) return;
+    if (!audio || !activeAudioUrl) return;
     if (audio.paused) {
-      audio.play().catch(() => {});
-      setIsPlaying(true);
+      audio.play().catch((err) => console.error("Audio playback error:", err));
     } else {
       audio.pause();
-      setIsPlaying(false);
     }
-  }, [previewAudioUrl]);
+  }, [activeAudioUrl]);
 
   const handleAudioTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || !audio.duration) return;
-    setAudioProgress((audio.currentTime / audio.duration) * 100);
-  }, []);
+    if (!audio) return;
+
+    const d =
+      isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : audioDuration;
+
+    if (d > 0) {
+      setAudioProgress(Math.min(100, (audio.currentTime / d) * 100));
+    }
+  }, [audioDuration]);
 
   const handleAudioEnded = useCallback(() => {
     setIsPlaying(false);
@@ -253,13 +423,37 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const handleAudioSeek = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const audio = audioRef.current;
-      if (!audio || !audioDuration) return;
       const pct = parseFloat(e.target.value);
-      audio.currentTime = (pct / 100) * audioDuration;
       setAudioProgress(pct);
+
+      if (!audio) return;
+      const d =
+        isFinite(audio.duration) && audio.duration > 0
+          ? audio.duration
+          : audioDuration;
+      if (d > 0) audio.currentTime = (pct / 100) * d;
     },
     [audioDuration],
   );
+
+  const handleLoadedMetadata = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio && isFinite(audio.duration) && audio.duration > 0) {
+      setAudioDuration(audio.duration);
+    }
+  }, []);
+
+  // Fallback: rAF progress while playing (if timeupdate is sparse)
+  useEffect(() => {
+    if (!isPlaying) return;
+    let id = 0;
+    const tick = () => {
+      handleAudioTimeUpdate();
+      id = requestAnimationFrame(tick);
+    };
+    id = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(id);
+  }, [isPlaying, handleAudioTimeUpdate]);
 
   // ─── Edit / typing / send ────────────────────────────────────────────────
   useEffect(() => {
@@ -322,22 +516,47 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   }, [onCancelEdit]);
 
   const handleSend = useCallback(() => {
-    // Voice note ready to send
-    if (recordingBlob && mediaPreview?.type === "audio") {
-      const dur = Math.max(
-        1,
-        Math.floor(audioDuration || recordingDurationRef.current || 0),
-      );
-      onVoiceRecording?.(recordingBlob, dur);
-      discardRecording();
-      setContent("");
-      setFileAttachment(null);
-      setShowAttachmentMenu(false);
-      setShowEmojiPicker(false);
-      stopTyping();
-      return;
+    // If we have a voice recording
+    if (mediaPreview?.type === "audio") {
+      const audioUrl = mediaPreview.url;
+
+      // ✅ If URL is local (starts with blob:), try to re-upload
+      if (audioUrl.startsWith("blob:")) {
+        if (recordingBlob) {
+          setIsUploadingVoice(true);
+          const dur = Math.max(
+            1,
+            Math.floor(audioDuration || recordingDurationRef.current || 1),
+          );
+          uploadVoiceToCloudinary(recordingBlob, dur).then((url) => {
+            setIsUploadingVoice(false);
+            if (url) {
+              onSend("🎤 Voice message", "VOICE_NOTE", url);
+              toast.success("Voice message sent!");
+              discardRecording();
+            } else {
+              toast.error("Failed to upload voice. Please try again.");
+            }
+          });
+        }
+        return;
+      }
+
+      // ✅ If URL is already from Cloudinary, send it
+      if (audioUrl.includes("cloudinary.com")) {
+        onSend("🎤 Voice message", "VOICE_NOTE", audioUrl);
+        toast.success("Voice message sent!");
+        discardRecording();
+        setContent("");
+        setFileAttachment(null);
+        setShowAttachmentMenu(false);
+        setShowEmojiPicker(false);
+        stopTyping();
+        return;
+      }
     }
 
+    // ... rest of the send logic for text, images, etc.
     if (!content.trim() && !mediaPreview && !fileAttachment) return;
 
     let messageType = "TEXT";
@@ -372,7 +591,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     recordingBlob,
     audioDuration,
     onSend,
-    onVoiceRecording,
+    uploadVoiceToCloudinary,
     discardRecording,
     stopTyping,
   ]);
@@ -397,7 +616,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       const file = e.target.files?.[0];
       if (!file) return;
       if (file.size > 50 * 1024 * 1024) {
-        alert("File size exceeds 50MB limit");
+        toast.error("File size exceeds 50MB limit");
         return;
       }
       setIsUploading(true);
@@ -451,8 +670,12 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       clearRecordingTimer();
+      stopVisualizer();
       stopTracks();
-      if (mediaRecorderRef.current?.state === "recording") {
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state !== "inactive"
+      ) {
         try {
           mediaRecorderRef.current.stop();
         } catch {
@@ -502,16 +725,19 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         onChange={(e) => handleFileUpload(e, "file")}
       />
 
-      {previewAudioUrl && (
+      {activeAudioUrl && (
         <audio
+          key={activeAudioUrl}
           ref={audioRef}
-          src={previewAudioUrl}
+          src={activeAudioUrl}
           onTimeUpdate={handleAudioTimeUpdate}
           onEnded={handleAudioEnded}
+          onLoadedMetadata={handleLoadedMetadata}
+          onDurationChange={handleLoadedMetadata}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           className="hidden"
-          preload="metadata"
+          preload="auto"
         />
       )}
 
@@ -524,97 +750,145 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         </div>
       )}
 
-      {(mediaPreview || fileAttachment || isUploading) && !isEditMode && (
-        <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200/80 rounded-2xl">
-          {isUploading ? (
-            <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Uploading…
-            </div>
-          ) : mediaPreview?.type === "audio" ? (
-            <div className="flex items-center gap-3 w-full">
-              <button
-                type="button"
-                onClick={togglePlayback}
-                className="w-10 h-10 rounded-full bg-indigo-100 hover:bg-indigo-200 flex items-center justify-center text-indigo-600 shrink-0"
-              >
-                {isPlaying ? (
-                  <Pause className="w-5 h-5" />
-                ) : (
-                  <Play className="w-5 h-5 ml-0.5" />
-                )}
-              </button>
-              <div className="flex-1 flex items-center gap-3 min-w-0">
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={audioProgress}
-                  onChange={handleAudioSeek}
-                  className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-600"
-                />
-                <span className="text-xs font-mono text-slate-600 min-w-[40px]">
-                  {formatDuration(
-                    audioDuration || recordingDurationRef.current,
-                  )}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={discardRecording}
-                className="p-1.5 text-slate-400 hover:text-rose-500 rounded-full hover:bg-rose-50"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          ) : mediaPreview?.type === "image" ? (
-            <div className="relative">
-              <img
-                src={mediaPreview.url}
-                alt=""
-                className="w-14 h-14 object-cover rounded-xl border border-slate-200"
-              />
-              <button
-                type="button"
-                onClick={removeAttachment}
-                className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white p-0.5 rounded-full"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : mediaPreview?.type === "video" ? (
-            <div className="relative w-14 h-14 bg-slate-800 rounded-xl flex items-center justify-center">
-              <Video className="w-6 h-6 text-white" />
-              <button
-                type="button"
-                onClick={removeAttachment}
-                className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white p-0.5 rounded-full"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : null}
+      {/* Live recording UI + spectrum */}
+      {isRecording && (
+        <div className="flex items-center gap-3 px-3 py-2.5 rounded-2xl border border-red-100 bg-red-50">
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-60" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+          </span>
 
-          {fileAttachment && (
-            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 max-w-[200px]">
-              <File className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <span className="truncate">{fileAttachment.name}</span>
-              {fileAttachment.size != null && (
-                <span className="text-[10px] text-slate-400">
-                  {formatFileSize(fileAttachment.size)}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={removeAttachment}
-                className="text-slate-400 hover:text-rose-600 ml-1"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
+          <div className="flex h-8 flex-1 items-center gap-[2px]">
+            {audioLevels.map((level, i) => (
+              <div
+                key={i}
+                className="w-[3px] rounded-full bg-red-500"
+                style={{
+                  height: `${Math.max(12, level * 100)}%`,
+                  opacity: 0.35 + level * 0.65,
+                  transition: "height 40ms linear",
+                }}
+              />
+            ))}
+          </div>
+
+          <span className="min-w-[40px] text-right text-sm font-semibold tabular-nums text-red-600">
+            {formatDuration(recordingDuration)}
+          </span>
+
+          <button
+            type="button"
+            onClick={stopRecording}
+            className="shrink-0 rounded-full bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600"
+          >
+            Stop
+          </button>
         </div>
       )}
+
+      {/* Preview / attachments */}
+      {(mediaPreview || fileAttachment || isUploading) &&
+        !isEditMode &&
+        !isRecording && (
+          <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200/80 rounded-2xl">
+            {isUploadingVoice && (
+              <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Uploading voice…
+              </div>
+            )}
+            {isUploading ? (
+              <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Uploading…
+              </div>
+            ) : mediaPreview?.type === "audio" ? (
+              <div className="flex items-center gap-3 w-full">
+                <button
+                  type="button"
+                  onClick={togglePlayback}
+                  className="w-10 h-10 rounded-full bg-indigo-100 hover:bg-indigo-200 flex items-center justify-center text-indigo-600 shrink-0"
+                >
+                  {isPlaying ? (
+                    <Pause className="w-5 h-5" />
+                  ) : (
+                    <Play className="w-5 h-5 ml-0.5" />
+                  )}
+                </button>
+                <div className="flex-1 flex items-center gap-3 min-w-0">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    value={audioProgress}
+                    onChange={handleAudioSeek}
+                    className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-600"
+                  />
+                  <span className="text-xs font-mono text-slate-600 min-w-[40px]">
+                    {formatDuration(
+                      isPlaying || audioProgress > 0
+                        ? (audioProgress / 100) * audioDuration
+                        : audioDuration,
+                    )}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={removeAttachment}
+                  className="p-1.5 text-slate-400 hover:text-rose-500 rounded-full hover:bg-rose-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ) : mediaPreview?.type === "image" ? (
+              <div className="relative">
+                <img
+                  src={mediaPreview.url}
+                  alt=""
+                  className="w-14 h-14 object-cover rounded-xl border border-slate-200"
+                />
+                <button
+                  type="button"
+                  onClick={removeAttachment}
+                  className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white p-0.5 rounded-full"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : mediaPreview?.type === "video" ? (
+              <div className="relative w-14 h-14 bg-slate-800 rounded-xl flex items-center justify-center">
+                <Video className="w-6 h-6 text-white" />
+                <button
+                  type="button"
+                  onClick={removeAttachment}
+                  className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white p-0.5 rounded-full"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : null}
+
+            {fileAttachment && (
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 max-w-[200px]">
+                <File className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span className="truncate">{fileAttachment.name}</span>
+                {fileAttachment.size != null && (
+                  <span className="text-[10px] text-slate-400">
+                    {formatFileSize(fileAttachment.size)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={removeAttachment}
+                  className="text-slate-400 hover:text-rose-600 ml-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
       {showAttachmentMenu && !isEditMode && (
         <div className="flex flex-wrap gap-1 p-2 bg-white border border-slate-200 rounded-xl shadow-lg">
@@ -657,7 +931,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
                   );
                   setShowAttachmentMenu(false);
                 },
-                () => alert("Unable to get location."),
+                () => toast.error("Unable to get location."),
               );
             }}
             className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
@@ -766,12 +1040,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
             </button>
           )}
 
-          {isRecording && (
-            <span className="text-xs font-mono text-red-500 font-bold min-w-[40px]">
-              {formatDuration(recordingDuration)}
-            </span>
-          )}
-
           {!isEditMode && (
             <button
               type="button"
@@ -794,9 +1062,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           <button
             type="button"
             onClick={handleSend}
-            disabled={!canSend}
+            disabled={!canSend || isUploadingVoice}
             className={`p-2.5 rounded-xl shrink-0 ${
-              !canSend
+              !canSend || isUploadingVoice
                 ? "bg-slate-100 text-slate-400 cursor-not-allowed"
                 : isEditMode
                   ? "bg-amber-500 hover:bg-amber-600 text-white"
@@ -804,7 +1072,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
             }`}
             title={isEditMode ? "Save" : "Send"}
           >
-            {isUploading ? (
+            {isUploading || isUploadingVoice ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : isEditMode ? (
               <Check className="w-4 h-4" />

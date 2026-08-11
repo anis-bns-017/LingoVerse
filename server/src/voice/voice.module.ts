@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { VoiceController } from './voice.controller';
 import { VoiceService } from './voice.service';
 import { VoiceGateway } from './voice.gateway';
+import { VoiceUploadController } from './upload.controller';
 import { LiveKitService } from './livekit.service';
 import { PrismaService } from '../prisma.service';
 
@@ -17,7 +18,7 @@ import { PrismaService } from '../prisma.service';
       inject: [ConfigService],
     }),
   ],
-  controllers: [VoiceController],
+  controllers: [VoiceController, VoiceUploadController],
   providers: [VoiceService, VoiceGateway, LiveKitService, PrismaService],
   exports: [VoiceService],
 })
