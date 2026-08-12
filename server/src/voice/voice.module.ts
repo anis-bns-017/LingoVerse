@@ -2,9 +2,9 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { VoiceController } from './voice.controller';
+import { UploadController } from '../upload/upload.controller';
 import { VoiceService } from './voice.service';
 import { VoiceGateway } from './voice.gateway';
-import { VoiceUploadController } from './upload.controller';
 import { LiveKitService } from './livekit.service';
 import { PrismaService } from '../prisma.service';
 
@@ -18,7 +18,7 @@ import { PrismaService } from '../prisma.service';
       inject: [ConfigService],
     }),
   ],
-  controllers: [VoiceController, VoiceUploadController],
+  controllers: [VoiceController, UploadController],
   providers: [VoiceService, VoiceGateway, LiveKitService, PrismaService],
   exports: [VoiceService],
 })

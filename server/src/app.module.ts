@@ -12,6 +12,7 @@ import { ChatModule } from './chat/chat.module';
 import { LearningModule } from './learning/learning.module';
 import { CommunitiesModule } from './communities/communities.module';
 import { FriendsModule } from './friends/friends.module';
+import { UploadModule } from './upload/upload.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { FriendsModule } from './friends/friends.module';
     LearningModule,
     FriendsModule,
     ChatModule,
+    UploadModule,
     VoiceModule,
     CommunitiesModule,
   ],

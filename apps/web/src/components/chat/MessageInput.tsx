@@ -21,7 +21,10 @@ import {
   Play,
   Pause,
   Trash2,
+  Sticker,
+  Plus,
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
 interface MessageInputProps {
@@ -43,11 +46,53 @@ interface MessageInputProps {
   recordingDuration?: number;
 }
 
-const BAR_COUNT = 32;
+const BAR_COUNT = 40;
 
-// ✅ Cloudinary upload preset - you need to create this in Cloudinary dashboard
-const CLOUDINARY_UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ; // Create this in Cloudinary
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME; // Replace with your cloud name
+const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_UPLOAD_PRESET_VOICE =
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET_VOICE ||
+  "lingoverse_voice_messages";
+const CLOUDINARY_UPLOAD_PRESET_IMAGE =
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET_IMAGE ||
+  "lingoverse_chat_images";
+const CLOUDINARY_UPLOAD_PRESET_VIDEO =
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET_VIDEO ||
+  "lingoverse_chat_videos";
+const CLOUDINARY_UPLOAD_PRESET_FILE =
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET_FILE || "lingoverse_chat_files";
+const CLOUDINARY_UPLOAD_PRESET_AVATAR =
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET_AVATAR ||
+  "lingoverse_user_avatars";
+
+const getUploadPreset = (type: string) => {
+  switch (type) {
+    case "audio":
+    case "voice":
+      return CLOUDINARY_UPLOAD_PRESET_VOICE;
+    case "image":
+      return CLOUDINARY_UPLOAD_PRESET_IMAGE;
+    case "video":
+      return CLOUDINARY_UPLOAD_PRESET_VIDEO;
+    case "avatar":
+      return CLOUDINARY_UPLOAD_PRESET_AVATAR;
+    default:
+      return CLOUDINARY_UPLOAD_PRESET_FILE;
+  }
+};
+
+const getResourceType = (type: string) => {
+  switch (type) {
+    case "image":
+      return "image";
+    case "video":
+      return "video";
+    case "audio":
+    case "voice":
+      return "video";
+    default:
+      return "auto";
+  }
+};
 
 export const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
@@ -76,8 +121,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [isTypingState, setIsTypingState] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
-  // Recording
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
@@ -104,7 +149,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Visualizer
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -140,7 +184,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   };
 
-  // ─── Live spectrum (while recording) ─────────────────────────────────────
   const stopVisualizer = useCallback(() => {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
@@ -196,57 +239,57 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, []);
 
-  // ─── Upload voice to Cloudinary ───────────────────────────────────────────
-  const uploadVoiceToCloudinary = useCallback(
-    async (blob: Blob, duration: number): Promise<string | null> => {
-      setIsUploadingVoice(true);
+  const uploadToCloudinary = useCallback(
+    async (file: File, type: string): Promise<string | null> => {
       try {
-        console.log("📤 Starting voice upload...");
-        console.log("📁 Blob size:", blob.size, "bytes");
-        console.log("📁 Blob type:", blob.type);
-
-        // ✅ FIX: Use Blob directly, not File constructor
         const formData = new FormData();
-        // ✅ Append as blob with filename - this works everywhere
-        formData.append("file", blob, `voice-${Date.now()}.webm`);
-        formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-        formData.append("resource_type", "video");
+        formData.append("file", file);
+        formData.append("upload_preset", getUploadPreset(type));
 
-        const uploadUrl = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`;
-        console.log("🌐 Upload URL:", uploadUrl);
+        const resourceType = getResourceType(type);
+        const uploadUrl = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType}/upload`;
 
         const response = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
 
-        console.log("📡 Response status:", response.status);
-
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          console.error("❌ Cloudinary error:", errorData);
           throw new Error(
             errorData.error?.message || `Upload failed: ${response.status}`,
           );
         }
 
         const data = await response.json();
-        console.log("✅ Upload successful!");
-        console.log("🔗 Audio URL:", data.secure_url);
-
         return data.secure_url;
       } catch (error: any) {
-        console.error("❌ Voice upload error:", error);
-        console.error("❌ Error details:", error.message);
+        console.error(`Upload error (${type}):`, error);
         return null;
-      } finally {
-        setIsUploadingVoice(false);
       }
     },
     [],
   );
 
-  // ─── Recording ───────────────────────────────────────────────────────────
+  const uploadVoiceToCloudinary = useCallback(
+    async (blob: Blob, duration: number): Promise<string | null> => {
+      setIsUploadingVoice(true);
+      try {
+        const file = new File([blob], `voice-${Date.now()}.webm`, {
+          type: "audio/webm",
+        });
+        const url = await uploadToCloudinary(file, "voice");
+        return url;
+      } catch (error: any) {
+        console.error("Voice upload error:", error);
+        return null;
+      } finally {
+        setIsUploadingVoice(false);
+      }
+    },
+    [uploadToCloudinary],
+  );
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -300,20 +343,15 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         setAudioDuration(dur);
         setAudioProgress(0);
 
-        // ✅ TRY TO UPLOAD - BUT DO NOT AUTO-SEND
-        // Just upload and store the URL, let user click send
         const uploadedUrl = await uploadVoiceToCloudinary(blob, dur);
 
         if (uploadedUrl) {
-          // ✅ Store the uploaded URL in the preview
           setMediaPreview((prev) =>
             prev ? { ...prev, url: uploadedUrl } : null,
           );
-          // ✅ Update the preview audio URL to play from Cloudinary
           setPreviewAudioUrl(uploadedUrl);
-          toast.success("Voice uploaded! Tap send to share.");
+          toast.success("🎙️ Voice message ready to send!");
         } else {
-          // ❌ Upload failed - keep local preview for retry
           toast.error("Upload failed. Tap send to retry.");
         }
       };
@@ -344,13 +382,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       stopTracks();
       setIsRecording(false);
     }
-  }, [
-    startVisualizer,
-    stopVisualizer,
-    uploadVoiceToCloudinary,
-    onSend,
-    onVoiceRecording,
-  ]);
+  }, [startVisualizer, stopVisualizer, uploadVoiceToCloudinary]);
 
   const stopRecording = useCallback(() => {
     if (
@@ -389,7 +421,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     previewAudioUrl ||
     (mediaPreview?.type === "audio" ? mediaPreview.url : null);
 
-  // ─── Preview playback (progress bar) ─────────────────────────────────────
   const togglePlayback = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !activeAudioUrl) return;
@@ -443,7 +474,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, []);
 
-  // Fallback: rAF progress while playing (if timeupdate is sparse)
   useEffect(() => {
     if (!isPlaying) return;
     let id = 0;
@@ -455,7 +485,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     return () => cancelAnimationFrame(id);
   }, [isPlaying, handleAudioTimeUpdate]);
 
-  // ─── Edit / typing / send ────────────────────────────────────────────────
   useEffect(() => {
     if (editingMessage) {
       setContent(editingMessage.content || "");
@@ -516,11 +545,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   }, [onCancelEdit]);
 
   const handleSend = useCallback(() => {
-    // If we have a voice recording
     if (mediaPreview?.type === "audio") {
       const audioUrl = mediaPreview.url;
 
-      // ✅ If URL is local (starts with blob:), try to re-upload
       if (audioUrl.startsWith("blob:")) {
         if (recordingBlob) {
           setIsUploadingVoice(true);
@@ -532,7 +559,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
             setIsUploadingVoice(false);
             if (url) {
               onSend("🎤 Voice message", "VOICE_NOTE", url);
-              toast.success("Voice message sent!");
+              toast.success("🎙️ Voice message sent!");
               discardRecording();
             } else {
               toast.error("Failed to upload voice. Please try again.");
@@ -542,10 +569,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({
         return;
       }
 
-      // ✅ If URL is already from Cloudinary, send it
       if (audioUrl.includes("cloudinary.com")) {
         onSend("🎤 Voice message", "VOICE_NOTE", audioUrl);
-        toast.success("Voice message sent!");
+        toast.success("🎙️ Voice message sent!");
         discardRecording();
         setContent("");
         setFileAttachment(null);
@@ -556,7 +582,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       }
     }
 
-    // ... rest of the send logic for text, images, etc.
     if (!content.trim() && !mediaPreview && !fileAttachment) return;
 
     let messageType = "TEXT";
@@ -607,36 +632,108 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     [handleSend, editingMessage, handleCancelEdit],
   );
 
+  // ✅ FIXED: handleFileUpload with proper image preview
   const handleFileUpload = useCallback(
-    (
+    async (
       e: React.ChangeEvent<HTMLInputElement>,
       type: "image" | "video" | "audio" | "file",
     ) => {
       if (editingMessage) return;
       const file = e.target.files?.[0];
       if (!file) return;
+
       if (file.size > 50 * 1024 * 1024) {
         toast.error("File size exceeds 50MB limit");
         return;
       }
+
       setIsUploading(true);
-      const url = URL.createObjectURL(file);
-      if (type === "image") setMediaPreview({ url, type: "image" });
-      else if (type === "video")
-        setMediaPreview({ url, type: "video", name: file.name });
-      else if (type === "audio")
-        setMediaPreview({ url, type: "audio", name: file.name });
-      else
-        setFileAttachment({
-          name: file.name,
-          url,
-          size: file.size,
-          type: file.type,
-        });
-      setIsUploading(false);
-      setShowAttachmentMenu(false);
+
+      try {
+        // Create local URL for preview
+        const localUrl = URL.createObjectURL(file);
+        console.log("📸 Local URL created:", localUrl);
+
+        // Set preview IMMEDIATELY
+        if (type === "image") {
+          setMediaPreview({ 
+            url: localUrl, 
+            type: "image" 
+          });
+          console.log("✅ Image preview state updated with local URL");
+        } else if (type === "video") {
+          setMediaPreview({ 
+            url: localUrl, 
+            type: "video", 
+            name: file.name 
+          });
+        } else if (type === "audio") {
+          setMediaPreview({ 
+            url: localUrl, 
+            type: "audio", 
+            name: file.name 
+          });
+        } else {
+          setFileAttachment({
+            name: file.name,
+            url: localUrl,
+            size: file.size,
+            type: file.type,
+          });
+        }
+
+        // Upload to Cloudinary
+        const uploadedUrl = await uploadToCloudinary(file, type);
+
+        if (uploadedUrl) {
+          // Update preview with Cloudinary URL
+          if (type === "image") {
+            setMediaPreview({ 
+              url: uploadedUrl, 
+              type: "image" 
+            });
+            console.log("✅ Cloudinary URL set:", uploadedUrl);
+          } else if (type === "video") {
+            setMediaPreview({
+              url: uploadedUrl,
+              type: "video",
+              name: file.name,
+            });
+          } else if (type === "audio") {
+            setMediaPreview({
+              url: uploadedUrl,
+              type: "audio",
+              name: file.name,
+            });
+          } else {
+            setFileAttachment({
+              name: file.name,
+              url: uploadedUrl,
+              size: file.size,
+              type: file.type,
+            });
+          }
+
+          // Clean up local URL after upload
+          URL.revokeObjectURL(localUrl);
+
+          toast.success(
+            `📤 ${type.charAt(0).toUpperCase() + type.slice(1)} uploaded!`,
+          );
+        } else {
+          toast.warning("⚠️ Upload failed. Using local preview.");
+        }
+      } catch (error) {
+        console.error("Upload error:", error);
+        toast.error("Failed to upload file");
+      } finally {
+        setIsUploading(false);
+        setShowAttachmentMenu(false);
+        // Reset input
+        e.target.value = "";
+      }
     },
-    [editingMessage],
+    [editingMessage, uploadToCloudinary],
   );
 
   const removeAttachment = useCallback(() => {
@@ -695,7 +792,11 @@ export const MessageInput: React.FC<MessageInputProps> = ({
     !isSelectionMode;
 
   return (
-    <div className="space-y-2">
+    <motion.div
+      layout
+      className="space-y-2.5"
+      transition={{ type: "spring", damping: 25, stiffness: 300 }}
+    >
       <input
         type="file"
         ref={imageInputRef}
@@ -742,251 +843,387 @@ export const MessageInput: React.FC<MessageInputProps> = ({
       )}
 
       {!isConnected && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-2.5 px-4 py-2.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-2xl"
+        >
           <Clock className="w-4 h-4 text-amber-500 animate-pulse" />
           <span className="text-xs text-amber-700 font-medium">
             Reconnecting… Messages will send when connected
           </span>
-        </div>
+          <div className="flex-1" />
+          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+        </motion.div>
       )}
 
-      {/* Live recording UI + spectrum */}
-      {isRecording && (
-        <div className="flex items-center gap-3 px-3 py-2.5 rounded-2xl border border-red-100 bg-red-50">
-          <span className="relative flex h-2.5 w-2.5 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-60" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
-          </span>
-
-          <div className="flex h-8 flex-1 items-center gap-[2px]">
-            {audioLevels.map((level, i) => (
-              <div
-                key={i}
-                className="w-[3px] rounded-full bg-red-500"
-                style={{
-                  height: `${Math.max(12, level * 100)}%`,
-                  opacity: 0.35 + level * 0.65,
-                  transition: "height 40ms linear",
-                }}
-              />
-            ))}
-          </div>
-
-          <span className="min-w-[40px] text-right text-sm font-semibold tabular-nums text-red-600">
-            {formatDuration(recordingDuration)}
-          </span>
-
-          <button
-            type="button"
-            onClick={stopRecording}
-            className="shrink-0 rounded-full bg-red-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600"
+      {/* Recording UI */}
+      <AnimatePresence>
+        {isRecording && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
           >
-            Stop
-          </button>
-        </div>
-      )}
+            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60">
+              <motion.span
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 0.8, repeat: Infinity }}
+                className="relative flex h-3 w-3 shrink-0"
+              >
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-60" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+              </motion.span>
 
-      {/* Preview / attachments */}
-      {(mediaPreview || fileAttachment || isUploading) &&
-        !isEditMode &&
-        !isRecording && (
-          <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200/80 rounded-2xl">
-            {isUploadingVoice && (
-              <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Uploading voice…
-              </div>
-            )}
-            {isUploading ? (
-              <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Uploading…
-              </div>
-            ) : mediaPreview?.type === "audio" ? (
-              <div className="flex items-center gap-3 w-full">
-                <button
-                  type="button"
-                  onClick={togglePlayback}
-                  className="w-10 h-10 rounded-full bg-indigo-100 hover:bg-indigo-200 flex items-center justify-center text-indigo-600 shrink-0"
-                >
-                  {isPlaying ? (
-                    <Pause className="w-5 h-5" />
-                  ) : (
-                    <Play className="w-5 h-5 ml-0.5" />
-                  )}
-                </button>
-                <div className="flex-1 flex items-center gap-3 min-w-0">
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={0.1}
-                    value={audioProgress}
-                    onChange={handleAudioSeek}
-                    className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-600"
+              <div className="flex h-10 flex-1 items-center gap-[2px]">
+                {audioLevels.map((level, i) => (
+                  <motion.div
+                    key={i}
+                    className="w-[3px] rounded-full bg-gradient-to-t from-red-500 to-rose-500"
+                    style={{
+                      height: `${Math.max(12, level * 100)}%`,
+                      opacity: 0.35 + level * 0.65,
+                    }}
+                    transition={{ duration: 0.05 }}
                   />
-                  <span className="text-xs font-mono text-slate-600 min-w-[40px]">
-                    {formatDuration(
-                      isPlaying || audioProgress > 0
-                        ? (audioProgress / 100) * audioDuration
-                        : audioDuration,
-                    )}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={removeAttachment}
-                  className="p-1.5 text-slate-400 hover:text-rose-500 rounded-full hover:bg-rose-50"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                ))}
               </div>
-            ) : mediaPreview?.type === "image" ? (
-              <div className="relative">
-                <img
-                  src={mediaPreview.url}
-                  alt=""
-                  className="w-14 h-14 object-cover rounded-xl border border-slate-200"
-                />
-                <button
-                  type="button"
-                  onClick={removeAttachment}
-                  className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white p-0.5 rounded-full"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : mediaPreview?.type === "video" ? (
-              <div className="relative w-14 h-14 bg-slate-800 rounded-xl flex items-center justify-center">
-                <Video className="w-6 h-6 text-white" />
-                <button
-                  type="button"
-                  onClick={removeAttachment}
-                  className="absolute -top-1.5 -right-1.5 bg-slate-900 text-white p-0.5 rounded-full"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : null}
 
-            {fileAttachment && (
-              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 max-w-[200px]">
-                <File className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                <span className="truncate">{fileAttachment.name}</span>
-                {fileAttachment.size != null && (
-                  <span className="text-[10px] text-slate-400">
-                    {formatFileSize(fileAttachment.size)}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={removeAttachment}
-                  className="text-slate-400 hover:text-rose-600 ml-1"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
+              <motion.span
+                key={recordingDuration}
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1 }}
+                className="min-w-[44px] text-right text-sm font-bold tabular-nums text-red-600"
+              >
+                {formatDuration(recordingDuration)}
+              </motion.span>
+
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                type="button"
+                onClick={stopRecording}
+                className="shrink-0 rounded-full bg-gradient-to-r from-red-500 to-rose-500 px-4 py-1.5 text-xs font-semibold text-white shadow-lg shadow-red-500/20 hover:shadow-red-500/40 transition-all"
+              >
+                Stop Recording
+              </motion.button>
+            </div>
+          </motion.div>
         )}
+      </AnimatePresence>
 
-      {showAttachmentMenu && !isEditMode && (
-        <div className="flex flex-wrap gap-1 p-2 bg-white border border-slate-200 rounded-xl shadow-lg">
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
-          >
-            <ImageIcon className="w-4 h-4 text-blue-500" /> Image
-          </button>
-          <button
-            type="button"
-            onClick={() => videoInputRef.current?.click()}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
-          >
-            <Video className="w-4 h-4 text-red-500" /> Video
-          </button>
-          <button
-            type="button"
-            onClick={() => audioInputRef.current?.click()}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
-          >
-            <Music className="w-4 h-4 text-purple-500" /> Audio
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
-          >
-            <File className="w-4 h-4 text-orange-500" /> Document
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  onSend(
-                    `📍 Location: ${pos.coords.latitude}, ${pos.coords.longitude}`,
-                    "LOCATION",
-                  );
-                  setShowAttachmentMenu(false);
-                },
-                () => toast.error("Unable to get location."),
-              );
-            }}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
-          >
-            <MapPin className="w-4 h-4 text-emerald-500" /> Location
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onSend("📇 Contact shared", "CONTACT");
-              setShowAttachmentMenu(false);
-            }}
-            className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-600"
-          >
-            <AtSign className="w-4 h-4 text-indigo-500" /> Contact
-          </button>
-        </div>
-      )}
+      {/* Media Preview */}
+      <AnimatePresence>
+        {(mediaPreview || fileAttachment || isUploading) &&
+          !isEditMode &&
+          !isRecording && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="flex items-center gap-3 p-3 bg-white/80 backdrop-blur-sm border border-slate-200/80 rounded-2xl shadow-sm"
+            >
+              {isUploadingVoice && (
+                <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Uploading voice…
+                </div>
+              )}
+              {isUploading ? (
+                <div className="flex items-center gap-2 text-xs text-indigo-600 font-semibold px-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Uploading…
+                </div>
+              ) : mediaPreview?.type === "audio" ? (
+                <div className="flex items-center gap-3 w-full">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    type="button"
+                    onClick={togglePlayback}
+                    className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-violet-100 hover:from-indigo-200 hover:to-violet-200 flex items-center justify-center text-indigo-600 shrink-0 transition-all"
+                  >
+                    {isPlaying ? (
+                      <Pause className="w-4 h-4" />
+                    ) : (
+                      <Play className="w-4 h-4 ml-0.5" />
+                    )}
+                  </motion.button>
+                  <div className="flex-1 flex items-center gap-3 min-w-0">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      value={audioProgress}
+                      onChange={handleAudioSeek}
+                      className="w-full h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-indigo-600"
+                    />
+                    <span className="text-xs font-mono font-semibold text-slate-600 min-w-[40px]">
+                      {formatDuration(
+                        isPlaying || audioProgress > 0
+                          ? (audioProgress / 100) * audioDuration
+                          : audioDuration,
+                      )}
+                    </span>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    type="button"
+                    onClick={removeAttachment}
+                    className="p-1.5 text-slate-400 hover:text-rose-500 rounded-full hover:bg-rose-50 transition-all"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </motion.button>
+                </div>
+              ) : mediaPreview?.type === "image" ? (
+                /* ✅ FIXED: Image Preview with proper rendering */
+                <div className="relative group/preview">
+                  <div className="w-16 h-16 rounded-xl border border-slate-200 shadow-sm overflow-hidden bg-slate-50">
+                    {mediaPreview.url ? (
+                      <img
+                        src={mediaPreview.url}
+                        alt="Preview"
+                        className="w-full h-full object-cover transition-all"
+                        onLoad={() => {
+                          console.log("✅ Image loaded successfully:", mediaPreview.url);
+                        }}
+                        onError={(e) => {
+                          console.error("❌ Image failed to load:", mediaPreview.url);
+                          const target = e.target as HTMLImageElement;
+                          // Show fallback emoji
+                          target.style.display = 'none';
+                          const parent = target.parentElement;
+                          if (parent) {
+                            const fallback = document.createElement('div');
+                            fallback.className = 'w-full h-full flex items-center justify-center text-4xl';
+                            fallback.textContent = '🖼️';
+                            parent.appendChild(fallback);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    type="button"
+                    onClick={removeAttachment}
+                    className="absolute -top-2 -right-2 bg-slate-900 text-white p-0.5 rounded-full shadow-lg opacity-0 group-hover/preview:opacity-100 transition-opacity"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </motion.button>
+                </div>
+              ) : mediaPreview?.type === "video" ? (
+                <div className="relative group/preview w-16 h-16 bg-slate-800 rounded-xl flex items-center justify-center shadow-sm">
+                  <Video className="w-6 h-6 text-white" />
+                  <span className="absolute bottom-1 right-1 text-[8px] text-white/70 bg-black/50 px-1 rounded">
+                    {mediaPreview.name || "Video"}
+                  </span>
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    type="button"
+                    onClick={removeAttachment}
+                    className="absolute -top-2 -right-2 bg-slate-900 text-white p-0.5 rounded-full shadow-lg opacity-0 group-hover/preview:opacity-100 transition-opacity"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </motion.button>
+                </div>
+              ) : null}
 
-      <div
-        className={`flex items-end gap-2 bg-white border p-2 rounded-2xl shadow-sm transition-all ${
+              {fileAttachment && (
+                <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 max-w-[200px] shadow-sm">
+                  <File className="w-4 h-4 text-indigo-500 shrink-0" />
+                  <span className="truncate">{fileAttachment.name}</span>
+                  {fileAttachment.size != null && (
+                    <span className="text-[10px] text-slate-400">
+                      {formatFileSize(fileAttachment.size)}
+                    </span>
+                  )}
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    type="button"
+                    onClick={removeAttachment}
+                    className="text-slate-400 hover:text-rose-600 ml-1 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </motion.button>
+                </div>
+              )}
+            </motion.div>
+          )}
+      </AnimatePresence>
+
+      {/* Attachment Menu */}
+      <AnimatePresence>
+        {showAttachmentMenu && !isEditMode && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            className="flex flex-wrap gap-1 p-2.5 bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl shadow-xl"
+          >
+            {[
+              {
+                icon: ImageIcon,
+                label: "Image",
+                action: imageInputRef,
+                color: "blue",
+              },
+              {
+                icon: Video,
+                label: "Video",
+                action: videoInputRef,
+                color: "red",
+              },
+              {
+                icon: Music,
+                label: "Audio",
+                action: audioInputRef,
+                color: "purple",
+              },
+              {
+                icon: File,
+                label: "Document",
+                action: fileInputRef,
+                color: "orange",
+              },
+              { icon: ImageIcon, label: "GIF", action: null, color: "pink" },
+              {
+                icon: Sticker,
+                label: "Sticker",
+                action: null,
+                color: "emerald",
+              },
+            ].map((item) => (
+              <motion.button
+                key={item.label}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                type="button"
+                onClick={() => {
+                  if (item.action?.current) {
+                    item.action.current.click();
+                  } else {
+                    toast.info(`${item.label} coming soon!`);
+                    setShowAttachmentMenu(false);
+                  }
+                }}
+                className={`flex items-center gap-2 px-3.5 py-2 hover:bg-slate-50 rounded-xl text-xs font-medium text-slate-600 transition-all`}
+              >
+                <item.icon className={`w-4 h-4 text-${item.color}-500`} />
+                {item.label}
+              </motion.button>
+            ))}
+            <div className="w-px h-8 bg-slate-200 mx-1" />
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              type="button"
+              onClick={() => {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    onSend(
+                      `📍 Location: ${pos.coords.latitude}, ${pos.coords.longitude}`,
+                      "LOCATION",
+                    );
+                    setShowAttachmentMenu(false);
+                  },
+                  () => toast.error("Unable to get location."),
+                );
+              }}
+              className="flex items-center gap-2 px-3.5 py-2 hover:bg-slate-50 rounded-xl text-xs font-medium text-slate-600 transition-all"
+            >
+              <MapPin className="w-4 h-4 text-emerald-500" />
+              Location
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              type="button"
+              onClick={() => {
+                onSend("📇 Contact shared", "CONTACT");
+                setShowAttachmentMenu(false);
+              }}
+              className="flex items-center gap-2 px-3.5 py-2 hover:bg-slate-50 rounded-xl text-xs font-medium text-slate-600 transition-all"
+            >
+              <AtSign className="w-4 h-4 text-indigo-500" />
+              Contact
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Main Input Area */}
+      <motion.div
+        className={`flex items-end gap-2 bg-white/95 backdrop-blur-sm border p-2 rounded-2xl shadow-sm transition-all ${
           isEditMode
-            ? "border-amber-400 ring-2 ring-amber-400/20"
-            : "border-slate-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20"
+            ? "border-amber-400 ring-2 ring-amber-400/30 shadow-amber-500/10"
+            : isFocused
+              ? "border-indigo-500 ring-2 ring-indigo-500/30 shadow-indigo-500/10"
+              : "border-slate-200/80 hover:border-slate-300"
         }`}
+        animate={{
+          scale: isRecording ? 1.02 : 1,
+        }}
       >
         <div className="flex items-center gap-0.5 pb-1">
           {!isEditMode && (
             <>
-              <button
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.9 }}
                 type="button"
                 onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-xl"
+                className={`p-2 rounded-xl transition-all ${
+                  showAttachmentMenu
+                    ? "bg-indigo-100 text-indigo-600"
+                    : "text-slate-400 hover:text-indigo-600 hover:bg-slate-100"
+                }`}
                 title="Attach"
               >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <button
+                <Plus
+                  className={`w-4 h-4 transition-transform ${showAttachmentMenu ? "rotate-45" : ""}`}
+                />
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.9 }}
                 type="button"
                 onClick={() => {
                   setShowEmojiPicker(!showEmojiPicker);
                   onEmojiPickerToggle?.();
                 }}
-                className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-100 rounded-xl"
+                className={`p-2 rounded-xl transition-all ${
+                  showEmojiPicker
+                    ? "bg-amber-100 text-amber-600"
+                    : "text-slate-400 hover:text-amber-500 hover:bg-slate-100"
+                }`}
                 title="Emoji"
               >
                 <Smile className="w-4 h-4" />
-              </button>
+              </motion.button>
             </>
           )}
           {isEditMode && (
-            <div className="flex items-center gap-1.5 px-2 text-amber-600">
-              <Edit className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-semibold">Editing</span>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center gap-2 px-3 py-1.5 bg-amber-100/80 rounded-xl"
+            >
+              <Edit className="w-3.5 h-3.5 text-amber-600" />
+              <span className="text-[11px] font-semibold text-amber-700">
+                Editing
+              </span>
+            </motion.div>
           )}
         </div>
 
@@ -995,39 +1232,48 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           value={content}
           onChange={(e) => handleTyping(e.target.value)}
           onKeyDown={handleKeyDown}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
           placeholder={
             isEditMode
               ? "Edit your message… (Esc to cancel)"
               : isRecording
-                ? "Recording…"
+                ? "Recording voice message…"
                 : isSelectionMode
-                  ? "Select messages…"
-                  : "Type a message… (Shift + Enter for new line)"
+                  ? "Select messages to manage"
+                  : "Type a message…"
           }
           rows={1}
           disabled={isRecording || isSelectionMode}
-          className="flex-1 bg-transparent py-1.5 px-1 text-sm font-medium text-slate-800 placeholder-slate-400 focus:outline-none resize-none max-h-32"
+          className="flex-1 bg-transparent py-2 px-1 text-sm font-medium text-slate-800 placeholder-slate-400 focus:outline-none resize-none max-h-32 min-h-[40px]"
         />
 
         <div className="flex items-center gap-0.5 pb-1">
           {isEditMode && (
-            <button
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.9 }}
               type="button"
               onClick={handleCancelEdit}
-              className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl"
+              className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
               title="Cancel"
             >
               <X className="w-4 h-4" />
-            </button>
+            </motion.button>
           )}
 
           {!isEditMode && (
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.9 }}
               type="button"
               onClick={toggleRecording}
-              className={`p-2 rounded-xl ${
+              className={`p-2 rounded-xl transition-all relative ${
                 isRecording
-                  ? "bg-red-500 text-white animate-pulse"
+                  ? "bg-red-500 text-white shadow-lg shadow-red-500/30"
                   : "text-slate-400 hover:text-indigo-600 hover:bg-slate-100"
               }`}
               title={isRecording ? "Stop recording" : "Record voice message"}
@@ -1037,40 +1283,47 @@ export const MessageInput: React.FC<MessageInputProps> = ({
               ) : (
                 <Mic className="w-4 h-4" />
               )}
-            </button>
+              {!isRecording && !isEditMode && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400" />
+              )}
+            </motion.button>
           )}
 
           {!isEditMode && (
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.9 }}
               type="button"
               onClick={onSelectMessages}
-              className={`p-2 rounded-xl ${
+              className={`p-2 rounded-xl transition-all ${
                 isSelectionMode
                   ? "bg-indigo-100 text-indigo-600"
                   : "text-slate-400 hover:text-indigo-600 hover:bg-slate-100"
               }`}
-              title="Select"
+              title="Select messages"
             >
               {isSelectionMode ? (
                 <CircleCheck className="w-4 h-4" />
               ) : (
                 <Circle className="w-4 h-4" />
               )}
-            </button>
+            </motion.button>
           )}
 
-          <button
+          <motion.button
+            whileHover={!(!canSend || isUploadingVoice) ? { scale: 1.05 } : {}}
+            whileTap={!(!canSend || isUploadingVoice) ? { scale: 0.9 } : {}}
             type="button"
             onClick={handleSend}
             disabled={!canSend || isUploadingVoice}
-            className={`p-2.5 rounded-xl shrink-0 ${
+            className={`p-2.5 rounded-xl shrink-0 transition-all ${
               !canSend || isUploadingVoice
                 ? "bg-slate-100 text-slate-400 cursor-not-allowed"
                 : isEditMode
-                  ? "bg-amber-500 hover:bg-amber-600 text-white"
-                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                  ? "bg-gradient-to-r from-amber-500 to-orange-500 hover:shadow-lg hover:shadow-amber-500/30 text-white"
+                  : "bg-gradient-to-r from-indigo-600 to-violet-600 hover:shadow-lg hover:shadow-indigo-500/30 text-white"
             }`}
-            title={isEditMode ? "Save" : "Send"}
+            title={isEditMode ? "Save changes" : "Send message"}
           >
             {isUploading || isUploadingVoice ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -1079,45 +1332,63 @@ export const MessageInput: React.FC<MessageInputProps> = ({
             ) : (
               <Send className="w-4 h-4" />
             )}
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
-      {showEmojiPicker && !isEditMode && (
-        <div className="flex flex-wrap gap-1 p-2 bg-white border border-slate-200 rounded-xl shadow-lg">
-          {[
-            "😊",
-            "😂",
-            "❤️",
-            "🔥",
-            "👍",
-            "👏",
-            "🙏",
-            "🎉",
-            "😍",
-            "🤔",
-            "😭",
-            "🥺",
-            "💯",
-            "✨",
-            "🌟",
-            "🎊",
-          ].map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => {
-                setContent((prev) => prev + emoji);
-                setShowEmojiPicker(false);
-                textareaRef.current?.focus();
-              }}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-xl hover:scale-125 transition-transform"
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      {/* Emoji Picker */}
+      <AnimatePresence>
+        {showEmojiPicker && !isEditMode && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            className="flex flex-wrap gap-1 p-3 bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-2xl shadow-xl"
+          >
+            {[
+              "😊",
+              "😂",
+              "❤️",
+              "🔥",
+              "👍",
+              "👏",
+              "🙏",
+              "🎉",
+              "😍",
+              "🤔",
+              "😭",
+              "🥺",
+              "💯",
+              "✨",
+              "🌟",
+              "🎊",
+              "🚀",
+              "💪",
+              "🤗",
+              "🥰",
+              "😎",
+              "🤩",
+              "😇",
+              "🤣",
+            ].map((emoji) => (
+              <motion.button
+                key={emoji}
+                whileHover={{ scale: 1.3, rotate: -5 }}
+                whileTap={{ scale: 0.8 }}
+                type="button"
+                onClick={() => {
+                  setContent((prev) => prev + emoji);
+                  setShowEmojiPicker(false);
+                  textareaRef.current?.focus();
+                }}
+                className="p-1.5 hover:bg-slate-100 rounded-lg text-xl transition-all"
+              >
+                {emoji}
+              </motion.button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 };
