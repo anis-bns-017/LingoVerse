@@ -24,6 +24,10 @@ export interface VoiceRoom {
   scheduledFor?: string;
   maxParticipants: number;
   isRecording: boolean;
+  language?: string;
+  topics: string[];
+  categories: string[];
+  tags: string[];
   participants: VoiceParticipant[];
   recordings: Recording[];
   stages: Stage[];
@@ -88,7 +92,18 @@ export const voiceApi = {
     apiClient.get<VoiceRoom[]>("/voice/rooms", { params }),
   getRoom: (roomId: string) =>
     apiClient.get<VoiceRoom>(`/voice/rooms/${roomId}`),
-  createRoom: (data: any) => apiClient.post<VoiceRoom>("/voice/rooms", data),
+  createRoom: (data: {
+    name: string;
+    description?: string;
+    type: string;
+    maxParticipants: number;
+    password?: string;
+    language?: string;
+    topics?: string[];
+    categories?: string[];
+    tags?: string[];
+    scheduledFor?: string;
+  }) => apiClient.post<VoiceRoom>("/voice/rooms", data),
   updateRoom: (roomId: string, data: any) =>
     apiClient.put(`/voice/rooms/${roomId}`, data),
   endRoom: (roomId: string) => apiClient.post(`/voice/rooms/${roomId}/end`),
@@ -207,7 +222,18 @@ export const useRoomStatus = (roomId: string) => {
 export const useCreateVoiceRoom = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: {
+      name: string;
+      description?: string;
+      type: string;
+      maxParticipants: number;
+      password?: string;
+      language?: string;
+      topics?: string[];
+      categories?: string[];
+      tags?: string[];
+      scheduledFor?: string;
+    }) => {
       const response = await voiceApi.createRoom(data);
       return response.data;
     },
@@ -455,7 +481,13 @@ export const useDeleteVoiceMessage = () => {
 export const usePromoteHost = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ roomId, userId }: { roomId: string; userId: string }) => {
+    mutationFn: async ({
+      roomId,
+      userId,
+    }: {
+      roomId: string;
+      userId: string;
+    }) => {
       const response = await voiceApi.promoteHost(roomId, userId);
       return response.data;
     },
@@ -732,7 +764,6 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
     [socket, isConnected, roomId],
   );
 
-  // ✅ NEW: Promote Host function
   const promoteHost = useCallback(
     (userIdToPromote: string) => {
       if (!socket || !isConnected) {
@@ -800,7 +831,7 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
     deleteMessage,
     muteSelf,
     fetchMessages,
-    promoteHost, // ✅ NEW
+    promoteHost,
   };
 };
 

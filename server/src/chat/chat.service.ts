@@ -502,12 +502,32 @@ export class ChatService {
       }
     }
 
+    let messageType: MessageType = MessageType.TEXT;
+
+    if (type === 'IMAGE') {
+      messageType = MessageType.IMAGE;
+    } else if (type === 'VIDEO') {
+      messageType = MessageType.VIDEO;
+    } else if (type === 'VOICE_NOTE') {
+      messageType = MessageType.VOICE_NOTE;
+    } else if (type === 'AUDIO') {
+      messageType = MessageType.AUDIO;
+    } else if (type === 'FILE') {
+      messageType = MessageType.FILE;
+    } else if (type === 'GIF') {
+      messageType = MessageType.GIF;
+    } else if (type === 'STICKER') {
+      messageType = MessageType.STICKER;
+    } else if (content && content.trim()) {
+      messageType = MessageType.TEXT;
+    }
+
     const message = await this.prisma.message.create({
       data: {
         communityId,
         senderId: userId,
         content,
-        type: (type as MessageType) || MessageType.TEXT,
+        type: messageType, 
         mediaUrl,
         fileUrl,
         replyToId,

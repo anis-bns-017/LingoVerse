@@ -3,10 +3,16 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
+import { CreateVoiceRoomDto, UpdateVoiceRoomDto } from './dto/voice.dto';
+import {
+  DiscoverRoomsDto,
+  RoomSortType,
+  RoomFilterType,
+} from './dto/discovery.dto';
 import { PrismaService } from '../prisma.service';
 import { LiveKitService } from './livekit.service';
-import { CreateVoiceRoomDto, UpdateVoiceRoomDto } from './dto/voice.dto';
 
 @Injectable()
 export class VoiceService {
@@ -15,75 +21,95 @@ export class VoiceService {
     private liveKitService: LiveKitService,
   ) {}
 
-  // ============ ROOMS ============
+  // ============ ROOM CRUD ============
 
-  async createRoom(userId: string, dto: CreateVoiceRoomDto) {
-    if (
-      dto.maxParticipants &&
-      (dto.maxParticipants < 2 || dto.maxParticipants > 100)
-    ) {
-      throw new BadRequestException(
-        'Max participants must be between 2 and 100',
-      );
-    }
+  async getRooms(userId: string, query: { type?: string; status?: string }) {
+    const where: any = {};
+    if (query.type) where.type = query.type;
+    if (query.status) where.status = query.status;
 
-    const liveKitRoomId = await this.liveKitService.createRoom(
-      `${dto.name}-${Date.now()}`,
-      dto.maxParticipants || 50,
-    );
-
-    const room = await this.prisma.voiceRoom.create({
-      data: {
-        name: dto.name,
-        description: dto.description,
-        type: dto.type || 'OPEN',
-        creatorId: userId,
-        scheduledFor: dto.scheduledFor ? new Date(dto.scheduledFor) : undefined,
-        maxParticipants: dto.maxParticipants || 50,
-        liveKitRoomId,
-        status: dto.scheduledFor ? 'WAITING' : 'ACTIVE',
-      },
-    });
-
-    await this.prisma.voiceParticipant.create({
-      data: {
-        roomId: room.id,
-        userId,
-        role: 'SPEAKER',
-      },
-    });
-
-    if (dto.type === 'STAGE') {
-      await this.prisma.stage.create({
-        data: {
-          roomId: room.id,
-          name: 'Main Stage',
-          speakers: [],
+    return this.prisma.voiceRoom.findMany({
+      where,
+      include: {
+        creator: {
+          select: { id: true, name: true, avatarUrl: true },
         },
-      });
-    }
-
-    return this.getRoomById(room.id, userId);
+        participants: {
+          where: { leftAt: null },
+          include: {
+            user: {
+              select: { id: true, name: true, avatarUrl: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async getRoomById(roomId: string, userId: string) {
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
       include: {
+        creator: {
+          select: { id: true, name: true, avatarUrl: true },
+        },
         participants: {
           where: { leftAt: null },
           include: {
             user: {
-              select: {
-                id: true,
-                name: true,
-                avatarUrl: true,
-              },
+              select: { id: true, name: true, avatarUrl: true },
             },
           },
         },
         recordings: true,
         stages: true,
+      },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return room;
+  }
+
+  async createRoom(userId: string, dto: CreateVoiceRoomDto) {
+    const {
+      name,
+      description,
+      type,
+      scheduledFor,
+      maxParticipants,
+      invitedUserIds,
+      language,
+      topics,
+      categories,
+      tags,
+    } = dto;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const room = await this.prisma.voiceRoom.create({
+      data: {
+        name,
+        description,
+        type,
+        maxParticipants: maxParticipants || 50,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : undefined,
+        language: language || null,
+        topics: topics || [],
+        categories: categories || [],
+        tags: tags || [],
+        creatorId: userId,
+        status: 'WAITING',
+      },
+      include: {
         creator: {
           select: {
             id: true,
@@ -91,55 +117,33 @@ export class VoiceService {
             avatarUrl: true,
           },
         },
-        messages: {
-          take: 50,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            sender: {
-              select: {
-                id: true,
-                name: true,
-                avatarUrl: true,
-              },
-            },
-          },
-        },
       },
     });
 
-    if (!room) throw new NotFoundException('Room not found');
+    // Add creator as participant with MODERATOR role
+    await this.prisma.voiceParticipant.create({
+      data: {
+        roomId: room.id,
+        userId: userId,
+        role: 'MODERATOR',
+      },
+    });
+
+    if (invitedUserIds && invitedUserIds.length > 0) {
+      for (const invitedUserId of invitedUserIds) {
+        if (invitedUserId !== userId) {
+          await this.prisma.voiceParticipant.create({
+            data: {
+              roomId: room.id,
+              userId: invitedUserId,
+              role: 'LISTENER',
+            },
+          });
+        }
+      }
+    }
+
     return room;
-  }
-
-  async getRooms(userId: string, filters?: { type?: string; status?: string }) {
-    const where: any = {};
-    if (filters?.type) where.type = filters.type;
-    if (filters?.status) where.status = filters.status;
-
-    return this.prisma.voiceRoom.findMany({
-      where,
-      include: {
-        participants: {
-          where: { leftAt: null },
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                avatarUrl: true,
-              },
-            },
-          },
-        },
-        creator: {
-          select: { id: true, name: true, avatarUrl: true },
-        },
-        _count: {
-          select: { participants: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
   }
 
   async updateRoom(userId: string, roomId: string, dto: UpdateVoiceRoomDto) {
@@ -148,42 +152,101 @@ export class VoiceService {
       include: { participants: true },
     });
 
-    if (!room) throw new NotFoundException('Room not found');
-    if (room.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can update this room');
+    if (!room) {
+      throw new NotFoundException('Room not found');
     }
 
-    return this.prisma.voiceRoom.update({
+    const isCreator = room.creatorId === userId;
+    const isModerator = room.participants.some(
+      (p) => p.userId === userId && p.role === 'MODERATOR',
+    );
+
+    if (!isCreator && !isModerator) {
+      throw new ForbiddenException(
+        'You are not authorized to update this room',
+      );
+    }
+
+    const {
+      name,
+      description,
+      maxParticipants,
+      isRecording,
+      language,
+      topics,
+      categories,
+      tags,
+    } = dto;
+
+    const updatedRoom = await this.prisma.voiceRoom.update({
       where: { id: roomId },
       data: {
-        name: dto.name,
-        description: dto.description,
-        isRecording: dto.isRecording,
-        maxParticipants: dto.maxParticipants,
+        name,
+        description,
+        maxParticipants,
+        isRecording: isRecording !== undefined ? isRecording : room.isRecording,
+        language: language !== undefined ? language : room.language,
+        topics: topics !== undefined ? topics : room.topics,
+        categories: categories !== undefined ? categories : room.categories,
+        tags: tags !== undefined ? tags : room.tags,
+      },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
       },
     });
+
+    return updatedRoom;
   }
 
   async endRoom(userId: string, roomId: string) {
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
     });
-    if (!room) throw new NotFoundException('Room not found');
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
     if (room.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can end this room');
+      const participant = await this.prisma.voiceParticipant.findUnique({
+        where: {
+          roomId_userId: {
+            roomId,
+            userId,
+          },
+        },
+      });
+
+      if (!participant || participant.role !== 'MODERATOR') {
+        throw new ForbiddenException(
+          'Only the creator or a moderator can end this room',
+        );
+      }
     }
 
-    if (room.liveKitRoomId) {
-      await this.liveKitService.endRoom(room.liveKitRoomId);
-    }
-
-    return this.prisma.voiceRoom.update({
+    const updatedRoom = await this.prisma.voiceRoom.update({
       where: { id: roomId },
       data: {
         status: 'ENDED',
         endedAt: new Date(),
       },
     });
+
+    if (room.liveKitRoomId) {
+      try {
+        await this.liveKitService.endRoom(room.liveKitRoomId);
+      } catch (error) {
+        console.error('Failed to end LiveKit room:', error);
+      }
+    }
+
+    return updatedRoom;
   }
 
   // ============ PARTICIPANTS ============
@@ -191,76 +254,133 @@ export class VoiceService {
   async joinRoom(userId: string, roomId: string) {
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
-      include: {
-        participants: {
-          where: { leftAt: null },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    if (room.status === 'ENDED') {
+      throw new BadRequestException('This room has ended');
+    }
+
+    const participantCount = await this.prisma.voiceParticipant.count({
+      where: { roomId, leftAt: null },
+    });
+
+    if (participantCount >= room.maxParticipants) {
+      throw new BadRequestException('This room is full');
+    }
+
+    const existingParticipant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId,
         },
       },
     });
-    if (!room) throw new NotFoundException('Room not found');
-    if (room.status === 'ENDED') {
-      throw new BadRequestException('Room has ended');
-    }
 
-    if (room.participants.length >= room.maxParticipants) {
-      throw new BadRequestException('Room is full');
-    }
-
-    const existing = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-    });
-
-    if (existing) {
-      await this.prisma.voiceParticipant.update({
-        where: { id: existing.id },
-        data: { leftAt: null, joinedAt: new Date() },
-      });
-
-      if (!room.liveKitRoomId) {
-        throw new BadRequestException('Room not properly initialized');
+    if (existingParticipant) {
+      if (existingParticipant.leftAt) {
+        return this.prisma.voiceParticipant.update({
+          where: { id: existingParticipant.id },
+          data: {
+            leftAt: null,
+            joinedAt: new Date(),
+          },
+        });
       }
-      const token = await this.liveKitService.getParticipantToken(
-        room.liveKitRoomId,
+      throw new ConflictException('User already in room');
+    }
+
+    let token: string | null = null;
+    let liveKitRoomId = room.liveKitRoomId;
+
+    if (room.status === 'ACTIVE') {
+      if (!liveKitRoomId) {
+        liveKitRoomId = `voice-${room.id}-${Date.now()}`;
+        await this.prisma.voiceRoom.update({
+          where: { id: roomId },
+          data: { liveKitRoomId },
+        });
+      }
+
+      token = await this.liveKitService.getParticipantToken(
+        liveKitRoomId,
         userId,
         userId,
+        { userId, roomId },
       );
-
-      return { token, participant: existing };
     }
-
-    if (!room.liveKitRoomId) {
-      throw new BadRequestException('Room not properly initialized');
-    }
-    const token = await this.liveKitService.getParticipantToken(
-      room.liveKitRoomId,
-      userId,
-      userId,
-    );
 
     const participant = await this.prisma.voiceParticipant.create({
       data: {
         roomId,
         userId,
-        role: room.type === 'STAGE' ? 'LISTENER' : 'SPEAKER',
+        role: 'LISTENER',
       },
     });
 
-    return { token, participant };
+    if (room.status === 'WAITING') {
+      await this.prisma.voiceRoom.update({
+        where: { id: roomId },
+        data: {
+          status: 'ACTIVE',
+          startedAt: new Date(),
+        },
+      });
+    }
+
+    return {
+      participant,
+      token,
+      liveKitRoomId,
+    };
   }
 
   async leaveRoom(userId: string, roomId: string) {
     const participant = await this.prisma.voiceParticipant.findUnique({
       where: {
-        roomId_userId: { roomId, userId },
+        roomId_userId: {
+          roomId,
+          userId,
+        },
       },
     });
-    if (!participant) throw new NotFoundException('Not in room');
+
+    if (!participant) {
+      throw new NotFoundException('User is not in this room');
+    }
 
     return this.prisma.voiceParticipant.update({
       where: { id: participant.id },
-      data: { leftAt: new Date() },
+      data: {
+        leftAt: new Date(),
+      },
+    });
+  }
+
+  async getRoomParticipants(roomId: string, userId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return this.prisma.voiceParticipant.findMany({
+      where: { roomId, leftAt: null },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+      },
     });
   }
 
@@ -272,35 +392,321 @@ export class VoiceService {
   ) {
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
-      include: { participants: true },
     });
-    if (!room) throw new NotFoundException('Room not found');
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
 
     const isCreator = room.creatorId === userId;
-    const isModerator = room.participants.some(
-      (p) => p.userId === userId && p.role === 'MODERATOR',
-    );
-    if (!isCreator && !isModerator) {
+    const isModerator = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId,
+        },
+      },
+    });
+
+    if (!isCreator && (!isModerator || isModerator.role !== 'MODERATOR')) {
       throw new ForbiddenException(
-        'Only creator or moderator can change roles',
+        'Only the creator or a moderator can update roles',
       );
+    }
+
+    return this.prisma.voiceParticipant.update({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId: targetUserId,
+        },
+      },
+      data: {
+        role: role as any,
+      },
+    });
+  }
+
+  // ============ ROOM DISCOVERY ============
+
+  // ✅ UPDATED: discoverRooms with correct DTO fields
+  async discoverRooms(userId: string, dto: DiscoverRoomsDto) {
+    const {
+      query,
+      sort = RoomSortType.TRENDING,
+      filter,
+      language,
+      category,
+      page = 1,
+      limit = 20,
+    } = dto;
+
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      status: 'ACTIVE',
+    };
+
+    // Search query
+    if (query) {
+      where.OR = [
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
+      ];
+    }
+
+    // Filter by type using RoomFilterType
+    if (filter) {
+      switch (filter) {
+        case RoomFilterType.OPEN:
+          where.type = 'OPEN';
+          break;
+        case RoomFilterType.PRIVATE:
+          where.type = 'PRIVATE';
+          break;
+        case RoomFilterType.STAGE:
+          where.type = 'STAGE';
+          break;
+        case RoomFilterType.SCHEDULED:
+          where.type = 'SCHEDULED';
+          break;
+        case RoomFilterType.LANGUAGE:
+          if (language) {
+            where.language = language;
+          }
+          break;
+        case RoomFilterType.ALL:
+        default:
+          break;
+      }
+    }
+
+    // Category filter
+    if (category) {
+      where.categories = { has: category };
+    }
+
+    // Language filter (if not already handled by filter)
+    if (language && filter !== RoomFilterType.LANGUAGE) {
+      where.language = language;
+    }
+
+    // Sorting
+    let orderBy: any = { createdAt: 'desc' };
+
+    switch (sort) {
+      case RoomSortType.TRENDING:
+        orderBy = { trendScore: 'desc' };
+        break;
+      case RoomSortType.POPULAR:
+        orderBy = { participants: { _count: 'desc' } };
+        break;
+      case RoomSortType.NEWEST:
+        orderBy = { createdAt: 'desc' };
+        break;
+      case RoomSortType.NEARBY:
+        // For nearby, we'd need location data - fallback to trending
+        orderBy = { trendScore: 'desc' };
+        break;
+      case RoomSortType.RECOMMENDED:
+        // For recommended, we'd need ML - fallback to trending
+        orderBy = { trendScore: 'desc' };
+        break;
+      default:
+        orderBy = { createdAt: 'desc' };
+    }
+
+    const [rooms, total] = await Promise.all([
+      this.prisma.voiceRoom.findMany({
+        where,
+        include: {
+          creator: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+            },
+          },
+          participants: {
+            where: { leftAt: null },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatarUrl: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy,
+        skip,
+        take: limit,
+      }),
+      this.prisma.voiceRoom.count({ where }),
+    ]);
+
+    // Transform rooms to include participant count
+    const transformedRooms = rooms.map((room) => ({
+      ...room,
+      participantCount: room.participants.length,
+      peakParticipantCount: room.participants.length,
+      messageCount: 0, // Would need to count messages
+      speakingHours: 0, // Would need to track speaking time
+      isLive: room.status === 'ACTIVE',
+    }));
+
+    return {
+      rooms: transformedRooms,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getTrendingRooms(userId: string, limit: number = 10) {
+    return this.prisma.voiceRoom.findMany({
+      where: { status: 'ACTIVE' },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        participants: {
+          where: { leftAt: null },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { trendScore: 'desc' },
+      take: limit,
+    });
+  }
+
+  async getRoomCategories() {
+    return [
+      { name: 'Conversation', icon: '💬', color: '#6366F1', roomCount: 0 },
+      { name: 'Language Learning', icon: '📚', color: '#8B5CF6', roomCount: 0 },
+      { name: 'Music', icon: '🎵', color: '#EC4899', roomCount: 0 },
+      { name: 'Gaming', icon: '🎮', color: '#8B5CF6', roomCount: 0 },
+      { name: 'Social', icon: '👥', color: '#06B6D4', roomCount: 0 },
+      { name: 'Casual', icon: '☕', color: '#F59E0B', roomCount: 0 },
+      { name: 'Podcast', icon: '🎙️', color: '#6366F1', roomCount: 0 },
+      { name: 'Study', icon: '📖', color: '#10B981', roomCount: 0 },
+      { name: 'Interview', icon: '🎤', color: '#EF4444', roomCount: 0 },
+      { name: 'Panel', icon: '🎭', color: '#8B5CF6', roomCount: 0 },
+    ];
+  }
+
+  async getLiveRoomsCount() {
+    return this.prisma.voiceRoom.count({
+      where: { status: 'ACTIVE' },
+    });
+  }
+
+  async getRecommendedRooms(userId: string, limit: number = 10) {
+    return this.prisma.voiceRoom.findMany({
+      where: { status: 'ACTIVE' },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            avatarUrl: true,
+          },
+        },
+        participants: {
+          where: { leftAt: null },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  // ============ HOST PROMOTION ============
+
+  async promoteHost(userId: string, roomId: string, newHostId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    if (room.creatorId !== userId) {
+      throw new ForbiddenException('Only the creator can promote a new host');
     }
 
     const participant = await this.prisma.voiceParticipant.findUnique({
       where: {
-        roomId_userId: { roomId, userId: targetUserId },
+        roomId_userId: {
+          roomId,
+          userId: newHostId,
+        },
       },
     });
-    if (!participant) throw new NotFoundException('Participant not found');
 
-    if (targetUserId === room.creatorId) {
-      throw new ForbiddenException("Cannot change the creator's role");
+    if (!participant) {
+      throw new NotFoundException('User is not in this room');
     }
 
-    return this.prisma.voiceParticipant.update({
-      where: { id: participant.id },
-      data: { role: role as any },
+    const updatedRoom = await this.prisma.voiceRoom.update({
+      where: { id: roomId },
+      data: {
+        creatorId: newHostId,
+      },
     });
+
+    await this.prisma.voiceParticipant.update({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId: newHostId,
+        },
+      },
+      data: {
+        role: 'MODERATOR',
+      },
+    });
+
+    await this.prisma.voiceParticipant.update({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId,
+        },
+      },
+      data: {
+        role: 'MODERATOR',
+      },
+    });
+
+    return updatedRoom;
   }
 
   // ============ STAGE ============
@@ -308,48 +714,43 @@ export class VoiceService {
   async addToStage(userId: string, roomId: string, targetUserId: string) {
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
-      include: {
-        stages: true,
-        participants: {
-          where: { userId: targetUserId },
-        },
-      },
+      include: { stages: true },
     });
-    if (!room) throw new NotFoundException('Room not found');
-    if (room.type !== 'STAGE') {
-      throw new BadRequestException('Not a stage room');
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
     }
 
-    const isCreator = room.creatorId === userId;
-    const isModerator = room.participants.some(
-      (p) => p.userId === userId && p.role === 'MODERATOR',
-    );
-    if (!isCreator && !isModerator) {
+    const isAuthorized =
+      room.creatorId === userId ||
+      (
+        await this.prisma.voiceParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId,
+              userId,
+            },
+          },
+        })
+      )?.role === 'MODERATOR';
+
+    if (!isAuthorized) {
       throw new ForbiddenException(
-        'Only creator or moderator can add to stage',
+        'Only the creator or a moderator can add to stage',
       );
     }
 
-    const stage = room.stages[0];
-    if (!stage) throw new NotFoundException('Stage not found');
-
-    const speakers = stage.speakers || [];
-    if (speakers.includes(targetUserId)) {
-      throw new BadRequestException('User already on stage');
+    let stage = room.stages[0];
+    if (!stage) {
+      stage = await this.prisma.stage.create({
+        data: {
+          roomId,
+          name: 'Main Stage',
+        },
+      });
     }
 
-    if (speakers.length >= 5) {
-      throw new BadRequestException('Stage is full');
-    }
-
-    await this.prisma.voiceParticipant.update({
-      where: {
-        roomId_userId: { roomId, userId: targetUserId },
-      },
-      data: { role: 'STAGE_SPEAKER' },
-    });
-
-    return this.prisma.stage.update({
+    const updatedStage = await this.prisma.stage.update({
       where: { id: stage.id },
       data: {
         speakers: {
@@ -357,118 +758,158 @@ export class VoiceService {
         },
       },
     });
+
+    return updatedStage;
   }
 
   async removeFromStage(userId: string, roomId: string, targetUserId: string) {
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
-      include: {
-        stages: true,
-        participants: true,
-      },
+      include: { stages: true },
     });
-    if (!room) throw new NotFoundException('Room not found');
 
-    const isCreator = room.creatorId === userId;
-    const isModerator = room.participants.some(
-      (p) => p.userId === userId && p.role === 'MODERATOR',
-    );
-    if (!isCreator && !isModerator) {
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    const isAuthorized =
+      room.creatorId === userId ||
+      (
+        await this.prisma.voiceParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId,
+              userId,
+            },
+          },
+        })
+      )?.role === 'MODERATOR';
+
+    if (!isAuthorized) {
       throw new ForbiddenException(
-        'Only creator or moderator can remove from stage',
+        'Only the creator or a moderator can remove from stage',
       );
     }
 
     const stage = room.stages[0];
-    if (!stage) throw new NotFoundException('Stage not found');
+    if (!stage) {
+      throw new NotFoundException('Stage not found');
+    }
 
-    const speakers = stage.speakers.filter((id) => id !== targetUserId);
-
-    await this.prisma.voiceParticipant.update({
-      where: {
-        roomId_userId: { roomId, userId: targetUserId },
-      },
-      data: { role: 'LISTENER' },
-    });
-
-    return this.prisma.stage.update({
+    const updatedStage = await this.prisma.stage.update({
       where: { id: stage.id },
-      data: { speakers },
+      data: {
+        speakers: {
+          set: stage.speakers.filter((id) => id !== targetUserId),
+        },
+      },
     });
+
+    return updatedStage;
   }
 
   // ============ RECORDINGS ============
 
-  async startRecording(userId: string, roomId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    if (room.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can start recording');
-    }
-
-    if (room.isRecording) {
-      throw new BadRequestException('Recording is already in progress');
-    }
-
-    if (room.liveKitRoomId) {
-      await this.liveKitService.startRecording(room.liveKitRoomId);
-    }
-
-    return this.prisma.voiceRoom.update({
-      where: { id: roomId },
-      data: { isRecording: true },
-    });
-  }
-
-  async stopRecording(userId: string, roomId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    if (room.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can stop recording');
-    }
-
-    if (!room.isRecording) {
-      throw new BadRequestException('No recording in progress');
-    }
-
-    if (room.liveKitRoomId) {
-      await this.liveKitService.stopRecording(room.liveKitRoomId);
-    }
-
-    return this.prisma.voiceRoom.update({
-      where: { id: roomId },
-      data: { isRecording: false },
-    });
-  }
-
   async getRecordings(roomId: string, userId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-    });
-    if (!participant) {
-      throw new ForbiddenException('Not a participant in this room');
-    }
-
     return this.prisma.recording.findMany({
       where: { roomId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  // ============ VOICE ROOM MESSAGES ============
+  async startRecording(userId: string, roomId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    const isAuthorized =
+      room.creatorId === userId ||
+      (
+        await this.prisma.voiceParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId,
+              userId,
+            },
+          },
+        })
+      )?.role === 'MODERATOR';
+
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        'Only the creator or a moderator can start recording',
+      );
+    }
+
+    const updatedRoom = await this.prisma.voiceRoom.update({
+      where: { id: roomId },
+      data: {
+        isRecording: true,
+      },
+    });
+
+    if (room.liveKitRoomId) {
+      try {
+        await this.liveKitService.startRecording(room.liveKitRoomId);
+      } catch (error) {
+        console.error('Failed to start LiveKit recording:', error);
+      }
+    }
+
+    return updatedRoom;
+  }
+
+  async stopRecording(userId: string, roomId: string) {
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    const isAuthorized =
+      room.creatorId === userId ||
+      (
+        await this.prisma.voiceParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId,
+              userId,
+            },
+          },
+        })
+      )?.role === 'MODERATOR';
+
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        'Only the creator or a moderator can stop recording',
+      );
+    }
+
+    const updatedRoom = await this.prisma.voiceRoom.update({
+      where: { id: roomId },
+      data: {
+        isRecording: false,
+      },
+    });
+
+    if (room.liveKitRoomId) {
+      try {
+        await this.liveKitService.stopRecording(room.liveKitRoomId);
+      } catch (error) {
+        console.error('Failed to stop LiveKit recording:', error);
+      }
+    }
+
+    return updatedRoom;
+  }
+
+  // ============ CHAT MESSAGES ============
 
   async getVoiceRoomMessages(
     userId: string,
@@ -476,33 +917,21 @@ export class VoiceService {
     limit: number = 50,
     before?: string,
   ) {
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
+    const room = await this.prisma.voiceRoom.findUnique({
+      where: { id: roomId },
     });
-    if (!participant) {
-      throw new ForbiddenException('You are not a participant in this room');
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
     }
 
-    const where: any = {
-      roomId: roomId,
-    };
-
+    const where: any = { roomId };
     if (before) {
-      const beforeMessage = await this.prisma.voiceRoomMessage.findUnique({
-        where: { id: before },
-        select: { createdAt: true },
-      });
-      if (beforeMessage) {
-        where.createdAt = { lt: beforeMessage.createdAt };
-      }
+      where.id = { lt: before };
     }
 
-    const messages = await this.prisma.voiceRoomMessage.findMany({
+    return this.prisma.voiceRoomMessage.findMany({
       where,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
       include: {
         sender: {
           select: {
@@ -511,10 +940,21 @@ export class VoiceService {
             avatarUrl: true,
           },
         },
+        replyTo: {
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
       },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
     });
-
-    return messages.reverse();
   }
 
   async sendVoiceRoomMessage(
@@ -526,36 +966,30 @@ export class VoiceService {
     fileUrl?: string,
     replyToId?: string,
   ) {
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-    });
-    if (!participant) {
-      throw new ForbiddenException('You are not a participant in this room');
-    }
-
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
     });
-    if (!room) throw new NotFoundException('Room not found');
-    if (room.status === 'ENDED') {
-      throw new BadRequestException('Room has ended');
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
     }
 
-    if (replyToId) {
-      const replyMessage = await this.prisma.voiceRoomMessage.findUnique({
-        where: { id: replyToId },
-        select: { roomId: true },
-      });
-      if (!replyMessage || replyMessage.roomId !== roomId) {
-        throw new BadRequestException('Invalid reply message');
-      }
+    const participant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId,
+        },
+      },
+    });
+
+    if (!participant) {
+      throw new ForbiddenException('You must be in the room to send messages');
     }
 
-    const message = await this.prisma.voiceRoomMessage.create({
+    return this.prisma.voiceRoomMessage.create({
       data: {
-        roomId: roomId,
+        roomId,
         senderId: userId,
         content,
         type,
@@ -571,10 +1005,19 @@ export class VoiceService {
             avatarUrl: true,
           },
         },
+        replyTo: {
+          include: {
+            sender: {
+              select: {
+                id: true,
+                name: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
       },
     });
-
-    return message;
   }
 
   async deleteVoiceRoomMessage(
@@ -582,127 +1025,54 @@ export class VoiceService {
     roomId: string,
     messageId: string,
   ) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
     const message = await this.prisma.voiceRoomMessage.findUnique({
       where: { id: messageId },
     });
-    if (!message) throw new NotFoundException('Message not found');
-    if (message.roomId !== roomId) {
-      throw new BadRequestException('Message does not belong to this room');
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
     }
 
-    const isCreator = room.creatorId === userId;
-    const isSender = message.senderId === userId;
-
-    if (!isCreator && !isSender) {
-      throw new ForbiddenException(
-        'You do not have permission to delete this message',
-      );
-    }
-
-    return this.prisma.voiceRoomMessage.delete({
-      where: { id: messageId },
-    });
-  }
-
-  // ============ HOST PROMOTION ============
-
-  async promoteHost(currentUserId: string, roomId: string, newHostId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-      select: { creatorId: true },
-    });
-
-    if (!room) {
-      throw new NotFoundException('Room not found');
-    }
-
-    if (room.creatorId !== currentUserId) {
-      throw new ForbiddenException(
-        'Only the host can transfer host privileges',
-      );
-    }
-
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId: newHostId },
-      },
-    });
-
-    if (!participant) {
-      throw new NotFoundException('User is not in the room');
-    }
-
-    await this.prisma.voiceRoom.update({
-      where: { id: roomId },
-      data: { creatorId: newHostId },
-    });
-
-    await this.prisma.voiceParticipant.update({
-      where: {
-        roomId_userId: { roomId, userId: newHostId },
-      },
-      data: { role: 'SPEAKER' },
-    });
-
-    await this.prisma.voiceParticipant.update({
-      where: {
-        roomId_userId: { roomId, userId: currentUserId },
-      },
-      data: { role: 'LISTENER' },
-    });
-
-    return { success: true, newHostId };
-  }
-
-  // ============ GET ROOM PARTICIPANTS ============
-
-  async getRoomParticipants(roomId: string, userId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-    });
-    if (!participant) {
-      throw new ForbiddenException('You are not a participant in this room');
-    }
-
-    return this.prisma.voiceParticipant.findMany({
-      where: {
-        roomId,
-        leftAt: null,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            avatarUrl: true,
+    const isAuthorized =
+      message.senderId === userId ||
+      (
+        await this.prisma.voiceParticipant.findUnique({
+          where: {
+            roomId_userId: {
+              roomId,
+              userId,
+            },
           },
+        })
+      )?.role === 'MODERATOR';
+
+    if (!isAuthorized) {
+      throw new ForbiddenException(
+        'Only the sender or a moderator can delete this message',
+      );
+    }
+
+    return this.prisma.voiceRoomMessage.update({
+      where: { id: messageId },
+      data: {
+        content: 'This message was deleted',
+      },
+    });
+  }
+
+  // ============ UTILITY ============
+
+  async isUserInRoom(roomId: string, userId: string) {
+    const participant = await this.prisma.voiceParticipant.findUnique({
+      where: {
+        roomId_userId: {
+          roomId,
+          userId,
         },
       },
     });
-  }
 
-  // ============ CHECK USER STATUS ============
-
-  async isUserInRoom(roomId: string, userId: string): Promise<boolean> {
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId },
-      },
-      select: { leftAt: true },
-    });
-    return !!participant && participant.leftAt === null;
+    return !!participant && !participant.leftAt;
   }
 
   async getActiveParticipants(roomId: string) {
@@ -720,112 +1090,6 @@ export class VoiceService {
           },
         },
       },
-    });
-  }
-
-  // ============ PARTICIPANT MUTE/UNMUTE ============
-
-  async muteParticipant(userId: string, roomId: string, targetUserId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-      include: { participants: true },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    const isCreator = room.creatorId === userId;
-    const isModerator = room.participants.some(
-      (p) => p.userId === userId && p.role === 'MODERATOR',
-    );
-    if (!isCreator && !isModerator) {
-      throw new ForbiddenException(
-        'Only creator or moderator can mute participants',
-      );
-    }
-
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId: targetUserId },
-      },
-    });
-    if (!participant) throw new NotFoundException('Participant not found');
-
-    if (targetUserId === room.creatorId) {
-      throw new ForbiddenException('Cannot mute the host');
-    }
-
-    return this.prisma.voiceParticipant.update({
-      where: { id: participant.id },
-      data: { isMuted: true },
-    });
-  }
-
-  async unmuteParticipant(
-    userId: string,
-    roomId: string,
-    targetUserId: string,
-  ) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-      include: { participants: true },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    const isCreator = room.creatorId === userId;
-    const isModerator = room.participants.some(
-      (p) => p.userId === userId && p.role === 'MODERATOR',
-    );
-    if (!isCreator && !isModerator) {
-      throw new ForbiddenException(
-        'Only creator or moderator can unmute participants',
-      );
-    }
-
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId: targetUserId },
-      },
-    });
-    if (!participant) throw new NotFoundException('Participant not found');
-
-    return this.prisma.voiceParticipant.update({
-      where: { id: participant.id },
-      data: { isMuted: false },
-    });
-  }
-
-  // ============ KICK PARTICIPANT ============
-
-  async kickParticipant(userId: string, roomId: string, targetUserId: string) {
-    const room = await this.prisma.voiceRoom.findUnique({
-      where: { id: roomId },
-      include: { participants: true },
-    });
-    if (!room) throw new NotFoundException('Room not found');
-
-    const isCreator = room.creatorId === userId;
-    const isModerator = room.participants.some(
-      (p) => p.userId === userId && p.role === 'MODERATOR',
-    );
-    if (!isCreator && !isModerator) {
-      throw new ForbiddenException(
-        'Only creator or moderator can kick participants',
-      );
-    }
-
-    if (targetUserId === room.creatorId) {
-      throw new ForbiddenException('Cannot kick the host');
-    }
-
-    const participant = await this.prisma.voiceParticipant.findUnique({
-      where: {
-        roomId_userId: { roomId, userId: targetUserId },
-      },
-    });
-    if (!participant) throw new NotFoundException('Participant not found');
-
-    return this.prisma.voiceParticipant.update({
-      where: { id: participant.id },
-      data: { leftAt: new Date() },
     });
   }
 }

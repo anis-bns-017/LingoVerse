@@ -1579,6 +1579,11 @@ model VoiceRoom {
   liveKitRoomId   String? // LiveKit room name
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  language        String?
+  categories      String[]
+  tags            String[]
+  topics          String[]
+  trendScore      Float         @default(0)
 
   participants VoiceParticipant[]
   recordings   Recording[]

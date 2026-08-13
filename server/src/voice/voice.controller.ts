@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { VoiceService } from './voice.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { DiscoverRoomsDto } from './dto/discovery.dto';
 import {
   CreateVoiceRoomDto,
   UpdateVoiceRoomDto,
@@ -93,6 +94,35 @@ export class VoiceController {
       targetUserId,
       role,
     );
+  }
+
+  // ============ ROOM DISCOVERY ============
+
+  @Get('discover')
+  async discoverRooms(@Request() req, @Query() dto: DiscoverRoomsDto) {
+    return this.voiceService.discoverRooms(req.user.id, dto);
+  }
+
+  @Get('trending')
+  async getTrendingRooms(@Request() req, @Query('limit') limit?: string) {
+    const parsedLimit = limit ? parseInt(limit, 10) : 10;
+    return this.voiceService.getTrendingRooms(req.user.id, parsedLimit);
+  }
+
+  @Get('categories')
+  async getRoomCategories() {
+    return this.voiceService.getRoomCategories();
+  }
+
+  @Get('live-count')
+  async getLiveRoomsCount() {
+    return this.voiceService.getLiveRoomsCount();
+  }
+
+  @Get('recommended')
+  async getRecommendedRooms(@Request() req, @Query('limit') limit?: string) {
+    const parsedLimit = limit ? parseInt(limit, 10) : 10;
+    return this.voiceService.getRecommendedRooms(req.user.id, parsedLimit);
   }
 
   // ============ HOST PROMOTION ============

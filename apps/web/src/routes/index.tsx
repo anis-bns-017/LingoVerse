@@ -22,6 +22,7 @@ import { CommunitiesPage } from "../pages/CommunitiesPage";
 import { CommunityPage } from "../pages/CommunityPage";
 import { JoinCommunityPage } from "../pages/JoinCommunityPage";
 import { NewConversationPage } from "../pages/NewConversationPage";
+import { DiscoveryPage } from "../pages/DiscoveryPage";
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -184,6 +185,15 @@ export const AppRoutes = () => {
           element={
             <ProtectedRoute>
               <NewConversationPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/discover"
+          element={
+            <ProtectedRoute>
+              <DiscoveryPage />
             </ProtectedRoute>
           }
         />

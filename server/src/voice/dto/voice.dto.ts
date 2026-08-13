@@ -40,6 +40,30 @@ export class CreateVoiceRoomDto {
   @IsArray()
   @IsUUID(4, { each: true })
   invitedUserIds?: string[];
+
+  // ✅ NEW FIELDS
+  @IsOptional()
+  @IsString()
+  language?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  topics?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categories?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  password?: string;
 }
 
 export class UpdateVoiceRoomDto {
@@ -60,6 +84,30 @@ export class UpdateVoiceRoomDto {
   @Min(2)
   @Max(100)
   maxParticipants?: number;
+
+  // ✅ NEW FIELDS
+  @IsOptional()
+  @IsString()
+  language?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  topics?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categories?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  password?: string;
 }
 
 // ============ PARTICIPANT DTOS ============
@@ -218,6 +266,10 @@ export class VoiceRoomResponseDto {
   maxParticipants: number;
   isRecording: boolean;
   liveKitRoomId?: string;
+  language?: string;
+  topics: string[];
+  categories: string[];
+  tags: string[];
   participants?: VoiceParticipantResponseDto[];
   recordings?: RecordingResponseDto[];
   stages?: StageResponseDto[];
@@ -272,6 +324,15 @@ export class VoiceRoomQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  language?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  topics?: string[];
 
   @IsOptional()
   @IsNumber()
