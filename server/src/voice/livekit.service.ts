@@ -1,3 +1,4 @@
+
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { RoomServiceClient, AccessToken, Room } from 'livekit-server-sdk';
 import { ConfigService } from '@nestjs/config';
@@ -235,6 +236,24 @@ export class LiveKitService implements OnModuleInit {
       this.logger.warn('⚠️ Falling back to mock token');
       return `mock-error-token-${userId}-${Date.now()}`;
     }
+  }
+
+  // ==================== NEW METHOD ====================
+  /**
+   * Generate a token for a participant to join a room
+   * This is a wrapper around getParticipantToken for consistency
+   */
+  async generateToken(
+    userId: string,
+    roomName: string,
+    metadata?: Record<string, any>,
+  ): Promise<string> {
+    return this.getParticipantToken(
+      roomName,
+      userId, // identity
+      userId, // userId
+      metadata || { userId },
+    );
   }
 
   async startRecording(_roomName: string): Promise<any> {

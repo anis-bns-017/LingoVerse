@@ -13,7 +13,7 @@ import {
   useLeaveVoiceRoom,
   type VoiceRoom,
 } from "../hooks/useVoice";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
 import {
@@ -29,7 +29,6 @@ import {
   Loader2,
   AudioLines,
   KeyRound,
-  Eye,
   EyeOff,
   MessageCircle,
   Clock,
@@ -87,8 +86,30 @@ import {
   Moon,
   Palette,
   Brush,
+  Minimize2,
+  Maximize2,
+  Bell,
+  BellOff,
+  Pin as PinIcon,
+  PinOff,
+  Volume,
+  VolumeOff as VolumeOffIcon,
+  UserCheck,
+  UserX as UserXIcon,
+  Crown as CrownIcon,
+  ShieldCheck,
+  BadgeCheck,
+  Verified,
+  Award as AwardIcon,
+  Trophy,
+  Medal,
+  Star as StarIcon,
+  Sparkle as SparkleIcon,
+  Eye,
 } from "lucide-react";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
+import { VoiceRoomView } from "../components/voice/VoiceRoomView";
+import { useChatSocket } from "../hooks/useChat";
 
 // ---- Theme Colors ----
 const COLORS = {
@@ -127,46 +148,192 @@ const TYPE_LABELS: Record<string, string> = {
   SCHEDULED: "Scheduled",
 };
 
-// Room Topic Icons
-const TOPIC_ICONS: Record<string, React.ElementType> = {
-  Conversation: MessageCircle,
-  "Language Learning": BookOpen,
-  Music: Music,
-  Gaming: Gamepad2,
-  Social: Users,
-  Casual: Coffee,
-  Podcast: Radio,
-  Study: BookOpen,
-  Interview: Mic,
-  Panel: Users,
+// ---- Custom Confirmation Modal ----
+const ConfirmationModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  confirmColor?: string;
+}> = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText = "Confirm",
+  cancelText = "Cancel",
+  confirmColor = "#EF4444",
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/80 backdrop-blur-2xl flex items-center justify-center z-[60] px-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        className="rounded-3xl w-full max-w-md p-6 border"
+        style={{ background: COLORS.surface, borderColor: COLORS.border }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-center">
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+            style={{ background: `${confirmColor}22` }}
+          >
+            <AlertCircle className="w-8 h-8" style={{ color: confirmColor }} />
+          </div>
+          <h3
+            className="font-serif text-xl mb-2"
+            style={{ color: COLORS.textPrimary }}
+          >
+            {title}
+          </h3>
+          <p className="text-sm mb-6" style={{ color: COLORS.textMuted }}>
+            {message}
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors hover:bg-white/5"
+              style={{ color: COLORS.textMuted }}
+            >
+              {cancelText}
+            </button>
+            <button
+              onClick={() => {
+                onConfirm();
+                onClose();
+              }}
+              className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-80"
+              style={{ background: confirmColor, color: "#fff" }}
+            >
+              {confirmText}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
 };
 
-const TOPICS = [
-  { name: "Conversation", icon: MessageCircle, color: "text-blue-400" },
-  { name: "Language Learning", icon: BookOpen, color: "text-emerald-400" },
-  { name: "Music", icon: Music, color: "text-pink-400" },
-  { name: "Gaming", icon: Gamepad2, color: "text-purple-400" },
-  { name: "Social", icon: Users, color: "text-cyan-400" },
-  { name: "Casual", icon: Coffee, color: "text-amber-400" },
-  { name: "Podcast", icon: Radio, color: "text-indigo-400" },
-  { name: "Study", icon: BookOpen, color: "text-emerald-400" },
-  { name: "Interview", icon: Mic, color: "text-red-400" },
-  { name: "Panel", icon: Users, color: "text-violet-400" },
-];
+// ---- Floating Mini Room ----
+const FloatingMiniRoom: React.FC<{
+  room: VoiceRoom;
+  onJoin: () => void;
+  onClose: () => void;
+  onMaximize: () => void;
+}> = ({ room, onJoin, onClose, onMaximize }) => {
+  return (
+    <motion.div
+      initial={{ y: 100, opacity: 0, scale: 0.9 }}
+      animate={{ y: 0, opacity: 1, scale: 1 }}
+      exit={{ y: 100, opacity: 0, scale: 0.9 }}
+      transition={{ type: "spring", damping: 25, stiffness: 300 }}
+      className="fixed bottom-6 right-6 z-50 w-72 rounded-2xl border shadow-2xl backdrop-blur-xl overflow-hidden"
+      style={{
+        background: "rgba(20, 20, 37, 0.95)",
+        borderColor: COLORS.border,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.8)",
+      }}
+      drag
+      dragConstraints={{ top: 0, left: 0, right: 0, bottom: 0 }}
+      dragElastic={0.1}
+    >
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b"
+        style={{ borderColor: COLORS.border }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <span
+            className="text-sm font-semibold truncate"
+            style={{ color: COLORS.textPrimary }}
+          >
+            {room.name}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onMaximize}
+            className="p-1 rounded hover:bg-white/5 transition-colors"
+            style={{ color: COLORS.textMuted }}
+            title="Maximize"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-white/5 transition-colors"
+            style={{ color: COLORS.textMuted }}
+            title="Close"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
 
-const LANGUAGES = [
-  "English",
-  "Spanish",
-  "French",
-  "German",
-  "Japanese",
-  "Chinese",
-  "Korean",
-  "Portuguese",
-  "Italian",
-  "Russian",
-];
+      <div className="p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex -space-x-2">
+            {(room.participants || []).slice(0, 3).map((p: any, i: number) => (
+              <div
+                key={i}
+                className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-semibold border-2"
+                style={{
+                  background: COLORS.surfaceRaised,
+                  borderColor: COLORS.surface,
+                  color: COLORS.textPrimary,
+                }}
+              >
+                {initials(p.user?.name || "?")}
+              </div>
+            ))}
+            {(room.participants?.length || 0) > 3 && (
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-semibold border-2"
+                style={{
+                  background: COLORS.surfaceRaised,
+                  borderColor: COLORS.surface,
+                  color: COLORS.textMuted,
+                }}
+              >
+                +{(room.participants?.length || 0) - 3}
+              </div>
+            )}
+          </div>
+          <span className="text-xs" style={{ color: COLORS.textMuted }}>
+            {room.participants?.length || 0} listening
+          </span>
+        </div>
 
+        <button
+          onClick={onJoin}
+          className="w-full py-2 rounded-full text-sm font-semibold transition-all hover:scale-105 active:scale-95"
+          style={{
+            background: `linear-gradient(135deg, ${TYPE_ACCENTS[room.type] || COLORS.spotlight}, ${COLORS.purple})`,
+            color: "#fff",
+          }}
+        >
+          Open Room
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+
+// ---- Helper Functions ----
 function initials(name: string) {
   return (
     name
@@ -200,13 +367,42 @@ function timeSince(date: string | Date) {
   return past.toLocaleDateString();
 }
 
-// ---- Create Room Modal Component ----
+// ---- TOPICS Array ----
+const TOPICS = [
+  { name: "Conversation", icon: MessageCircle, color: "text-blue-400" },
+  { name: "Language Learning", icon: BookOpen, color: "text-emerald-400" },
+  { name: "Music", icon: Music, color: "text-pink-400" },
+  { name: "Gaming", icon: Gamepad2, color: "text-purple-400" },
+  { name: "Social", icon: Users, color: "text-cyan-400" },
+  { name: "Casual", icon: Coffee, color: "text-amber-400" },
+  { name: "Podcast", icon: Radio, color: "text-indigo-400" },
+  { name: "Study", icon: BookOpen, color: "text-emerald-400" },
+  { name: "Interview", icon: Mic, color: "text-red-400" },
+  { name: "Panel", icon: Users, color: "text-violet-400" },
+];
+
+const LANGUAGES = [
+  "English",
+  "Spanish",
+  "French",
+  "German",
+  "Japanese",
+  "Chinese",
+  "Korean",
+  "Portuguese",
+  "Italian",
+  "Russian",
+];
+
+// ---- Create Room Modal ----
 const CreateRoomModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   onCreate: (data: any) => void;
   isPending: boolean;
-}> = ({ isOpen, onClose, onCreate, isPending }) => {
+  onMinimize?: () => void;
+  isMinimized?: boolean;
+}> = ({ isOpen, onClose, onCreate, isPending, onMinimize, isMinimized }) => {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     name: "",
@@ -221,6 +417,24 @@ const CreateRoomModal: React.FC<{
   const [showPassword, setShowPassword] = useState(false);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState("English");
+
+  useEffect(() => {
+    if (isOpen) {
+      setStep(1);
+      setFormData({
+        name: "",
+        description: "",
+        type: "OPEN",
+        maxParticipants: 50,
+        password: "",
+        topics: [],
+        language: "English",
+        tags: [],
+      });
+      setSelectedTopics([]);
+      setSelectedLanguage("English");
+    }
+  }, [isOpen]);
 
   const handleNext = () => {
     if (step === 1 && !formData.name.trim()) {
@@ -280,7 +494,6 @@ const CreateRoomModal: React.FC<{
         style={{ background: COLORS.surface, borderColor: COLORS.border }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header with progress */}
         <div
           className="sticky top-0 z-10 px-6 py-4 border-b"
           style={{ background: COLORS.surface, borderColor: COLORS.border }}
@@ -305,16 +518,28 @@ const CreateRoomModal: React.FC<{
                 </p>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-xl transition-colors hover:bg-white/5"
-              style={{ color: COLORS.textMuted }}
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              {onMinimize && (
+                <button
+                  onClick={onMinimize}
+                  className="p-2 rounded-xl transition-colors hover:bg-white/5"
+                  style={{ color: COLORS.textMuted }}
+                  title="Minimize"
+                >
+                  <Minimize2 className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl transition-colors hover:bg-white/5"
+                style={{ color: COLORS.textMuted }}
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
-          {/* Progress Bar */}
           <div className="flex gap-1 mt-3">
             {[1, 2, 3].map((i) => (
               <div
@@ -329,7 +554,6 @@ const CreateRoomModal: React.FC<{
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Step 1: Basic Info */}
           {step === 1 && (
             <motion.div
               initial={{ opacity: 0, x: 20 }}
@@ -400,9 +624,7 @@ const CreateRoomModal: React.FC<{
                         key={topic.name}
                         type="button"
                         onClick={() => toggleTopic(topic.name)}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-                          isSelected ? "ring-2 ring-offset-2" : ""
-                        }`}
+                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${isSelected ? "ring-2 ring-offset-2" : ""}`}
                         style={{
                           background: isSelected
                             ? COLORS.spotlightDim
@@ -444,7 +666,6 @@ const CreateRoomModal: React.FC<{
             </motion.div>
           )}
 
-          {/* Step 2: Settings */}
           {step === 2 && (
             <motion.div
               initial={{ opacity: 0, x: 20 }}
@@ -500,9 +721,7 @@ const CreateRoomModal: React.FC<{
                               password: "",
                             })
                           }
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm transition-all ${
-                            isSelected ? "ring-2 ring-offset-2" : ""
-                          }`}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm transition-all ${isSelected ? "ring-2 ring-offset-2" : ""}`}
                           style={{
                             background: isSelected
                               ? COLORS.spotlightDim
@@ -651,7 +870,6 @@ const CreateRoomModal: React.FC<{
             </motion.div>
           )}
 
-          {/* Step 3: Preview & Create */}
           {step === 3 && (
             <motion.div
               initial={{ opacity: 0, x: 20 }}
@@ -750,7 +968,6 @@ const CreateRoomModal: React.FC<{
             </motion.div>
           )}
 
-          {/* Navigation Buttons */}
           <div
             className="flex items-center justify-between pt-4 border-t"
             style={{ borderColor: COLORS.border }}
@@ -805,32 +1022,295 @@ const CreateRoomModal: React.FC<{
   );
 };
 
+// ---- Room Card Component ----
+const RoomCard: React.FC<{
+  room: VoiceRoom;
+  isCreator: boolean;
+  isFull: boolean;
+  isJoining: boolean;
+  onJoin: () => void;
+  onEnd: () => void;
+  onCopyLink: () => void;
+  accent: string;
+  typeConfig: { label: string; icon: React.ElementType };
+  status: { label: string; color: string; icon: React.ElementType };
+  participantCount: number;
+  previewParticipants: any[];
+  hasMoreParticipants: boolean;
+  currentUserInRoom: boolean;
+}> = ({
+  room,
+  isCreator,
+  isFull,
+  isJoining,
+  onJoin,
+  onEnd,
+  onCopyLink,
+  accent,
+  typeConfig,
+  status,
+  participantCount,
+  previewParticipants,
+  hasMoreParticipants,
+  currentUserInRoom,
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
+  const TypeIcon = typeConfig.icon;
+  const StatusIcon = status.icon;
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="group rounded-2xl border overflow-hidden transition-all hover:border-opacity-70"
+      style={{ background: COLORS.surface, borderColor: COLORS.border }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div className="h-1" style={{ background: accent }} />
+
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3
+                className="font-serif text-lg truncate"
+                style={{ color: COLORS.textPrimary }}
+              >
+                {room.name}
+              </h3>
+              {isCreator && (
+                <span
+                  className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1"
+                  style={{
+                    background: COLORS.spotlightDim,
+                    color: COLORS.spotlight,
+                  }}
+                >
+                  <Crown className="w-3 h-3" /> Host
+                </span>
+              )}
+              {room.isRecording && (
+                <span
+                  className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse"
+                  style={{
+                    background: "rgba(239, 68, 68, 0.2)",
+                    color: "#EF4444",
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                  Recording
+                </span>
+              )}
+              {currentUserInRoom && (
+                <span
+                  className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1"
+                  style={{ background: COLORS.liveDim, color: COLORS.live }}
+                >
+                  <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
+                  Inside
+                </span>
+              )}
+            </div>
+
+            {room.description && (
+              <p
+                className="text-sm mt-1 line-clamp-2"
+                style={{ color: COLORS.textMuted }}
+              >
+                {room.description}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span
+              className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded-full"
+              style={{ background: `${accent}22`, color: accent }}
+            >
+              <TypeIcon className="w-3 h-3" />
+              {typeConfig.label}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 mt-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            {previewParticipants.length > 0 && (
+              <div className="flex items-center -space-x-2">
+                {previewParticipants.map((p: any) => {
+                  const hue = hueFromString(p.user?.name || "?");
+                  return (
+                    <div
+                      key={p.id}
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-semibold border-2 transition-all group-hover:border-opacity-100"
+                      style={{
+                        background: `hsl(${hue}, 35%, 24%)`,
+                        borderColor: COLORS.surface,
+                        color: COLORS.textPrimary,
+                      }}
+                      title={p.user?.name || "Unknown"}
+                    >
+                      {initials(p.user?.name || "?")}
+                    </div>
+                  );
+                })}
+                {hasMoreParticipants && (
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-semibold border-2"
+                    style={{
+                      background: COLORS.surfaceRaised,
+                      borderColor: COLORS.surface,
+                      color: COLORS.textMuted,
+                    }}
+                  >
+                    +{participantCount - 4}
+                  </div>
+                )}
+              </div>
+            )}
+            <span
+              className="text-xs font-mono"
+              style={{ color: COLORS.textMuted }}
+            >
+              {participantCount}/{room.maxParticipants || 50}
+            </span>
+          </div>
+
+          <span
+            className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full"
+            style={{
+              background: `${status.color}22`,
+              color: status.color,
+            }}
+          >
+            <StatusIcon className="w-3 h-3" />
+            {status.label}
+          </span>
+
+          {room.scheduledFor && (
+            <span
+              className="text-xs font-mono"
+              style={{ color: COLORS.textMuted }}
+            >
+              <Clock className="w-3 h-3 inline mr-1" />
+              {new Date(room.scheduledFor).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+
+        {/* ✅ FIXED: ACTIONS - Show BOTH buttons for creator when they leave */}
+        <div
+          className="flex items-center gap-2 mt-4 pt-3 border-t"
+          style={{ borderColor: COLORS.border }}
+        >
+          {/* ✅ Case 1: Creator - ALWAYS show "End Room" */}
+          {/* ✅ Plus show "Join Room" if creator is NOT in the room */}
+          {isCreator && (
+            <>
+              {/* Show "Join Room" for creator if they're NOT in the room */}
+              {!currentUserInRoom && (
+                <button
+                  onClick={onJoin}
+                  disabled={isFull || isJoining}
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: accent,
+                    color: COLORS.void,
+                  }}
+                >
+                  {isJoining ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : room.type === "PRIVATE" ? (
+                    <Lock className="w-4 h-4" />
+                  ) : (
+                    <LogIn className="w-4 h-4" />
+                  )}
+                  {isJoining ? "Joining..." : "Join Room"}
+                </button>
+              )}
+
+              {/* Always show "End Room" for creator */}
+              <button
+                onClick={onEnd}
+                className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors hover:bg-white/5 ${
+                  !currentUserInRoom ? "flex-1" : "flex-1"
+                }`}
+                style={{ borderColor: COLORS.border, color: COLORS.textMuted }}
+              >
+                <Square className="w-3.5 h-3.5" />
+                End Room
+              </button>
+            </>
+          )}
+
+          {/* ✅ Case 2: Non-creator NOT in room - show "Join Room" */}
+          {!isCreator && !currentUserInRoom && (
+            <button
+              onClick={onJoin}
+              disabled={isFull || isJoining}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: isFull ? COLORS.textMuted : accent,
+                color: isFull ? COLORS.void : COLORS.void,
+              }}
+            >
+              {isJoining ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : room.type === "PRIVATE" ? (
+                <Lock className="w-4 h-4" />
+              ) : (
+                <LogIn className="w-4 h-4" />
+              )}
+              {isJoining ? "Joining..." : isFull ? "Full" : "Join Room"}
+            </button>
+          )}
+
+          {/* ✅ Case 3: Non-creator inside room - show "Inside" badge */}
+          {currentUserInRoom && !isCreator && (
+            <div
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-full text-sm font-medium"
+              style={{ color: COLORS.live }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              You're in this room
+            </div>
+          )}
+
+          <button
+            onClick={onCopyLink}
+            className="p-2 rounded-full transition-colors hover:bg-white/5"
+            style={{ color: COLORS.textMuted }}
+            title="Share room"
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
 // ---- Main VoicePage Component ----
 export const VoicePage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { roomId: urlRoomId } = useParams<{ roomId?: string }>();
   const { data: rooms, isLoading, refetch } = useVoiceRooms();
   const createRoom = useCreateVoiceRoom();
   const endRoom = useEndVoiceRoom();
   const joinRoom = useJoinVoiceRoom();
   const leaveRoom = useLeaveVoiceRoom();
+  useChatSocket("", user?.id || "");
 
+  // State
   const [showCreate, setShowCreate] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [isCreateMinimized, setIsCreateMinimized] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    type: "OPEN",
-    maxParticipants: 50,
-    password: "",
-    topics: [] as string[],
-    language: "English",
-    tags: [] as string[],
-  });
   const [joinTarget, setJoinTarget] = useState<{
     id: string;
     name: string;
@@ -840,14 +1320,55 @@ export const VoicePage = () => {
   const [showJoinPassword, setShowJoinPassword] = useState(false);
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<
+    { id: string; message: string; type: string }[]
+  >([]);
 
-  // Auto-refresh rooms every 30 seconds
+  // State for the current room ID
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(
+    urlRoomId || null,
+  );
+
+  // Floating Mini Room state
+  const [miniRoom, setMiniRoom] = useState<VoiceRoom | null>(null);
+  const [showMiniRoom, setShowMiniRoom] = useState(false);
+
+  // The API/cache can briefly contain stale participant data after leaving.
+  // Keep the last-left room locally so the creator immediately gets Join + End.
+  const [leftRoomId, setLeftRoomId] = useState<string | null>(null);
+
+  // Confirmation Modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    confirmColor?: string;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+
+  // Sync activeRoomId with URL param
+  useEffect(() => {
+    if (urlRoomId) {
+      setActiveRoomId(urlRoomId);
+    } else {
+      setActiveRoomId(null);
+    }
+  }, [urlRoomId]);
+
+  // Auto-refresh rooms every 15 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       if (!document.hidden) {
         refetch();
       }
-    }, 30000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [refetch]);
 
@@ -877,6 +1398,7 @@ export const VoicePage = () => {
     return result;
   }, [activeRooms, searchQuery, filterType]);
 
+  // ✅ FIXED: handleCreate - creates room and navigates properly
   const handleCreate = async (data: any) => {
     try {
       const payload: any = {
@@ -888,53 +1410,91 @@ export const VoicePage = () => {
         topics: data.topics || [],
       };
 
-      // Only include password if room is PRIVATE
       if (data.type === "PRIVATE") {
         payload.password = data.password;
       }
 
       const newRoom = await createRoom.mutateAsync(payload);
+
+      if (!newRoom || !newRoom.id) {
+        toast.error("Room creation failed. Please try again.");
+        return;
+      }
+
       toast.success("🎉 Room created! Invite others to join.");
       setShowCreate(false);
-      setFormData({
-        name: "",
-        description: "",
-        type: "OPEN",
-        maxParticipants: 50,
-        password: "",
-        topics: [],
-        language: "English",
-        tags: [],
-      });
+      setIsCreateMinimized(false);
+      setNotifications((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          message: `Room "${newRoom.name}" created successfully!`,
+          type: "success",
+        },
+      ]);
+
+      setLeftRoomId(null);
+      setActiveRoomId(newRoom.id);
       navigate(`/voice/${newRoom.id}`);
     } catch (error: any) {
+      console.error("Create room error:", error);
       toast.error(error.response?.data?.message || "Failed to create room");
     }
   };
 
-  const handleJoin = async (room: VoiceRoom) => {
-    const isCreator = room.creatorId === user?.id;
+  // Handle joining/rejoining a room
+  const handleJoinRoom = async (room: VoiceRoom) => {
+    const isAlreadyInRoom = room.participants?.some(
+      (p: any) => p.userId === user?.id,
+    );
+
+    // If user is already in the room, just navigate directly
+    if (isAlreadyInRoom) {
+      setLeftRoomId(null);
+      setActiveRoomId(room.id);
+      navigate(`/voice/${room.id}`);
+      return;
+    }
+
     if (room.status === "ENDED") {
       toast.error("This room has ended");
       refetch();
       return;
     }
+
     const currentParticipants = room.participants?.length || 0;
     if (currentParticipants >= room.maxParticipants) {
       toast.error("This room is full");
       return;
     }
-    if (room.type === "PRIVATE" && !isCreator) {
+
+    if (room.type === "PRIVATE") {
       setJoinTarget({ id: room.id, name: room.name });
       setJoinPassword("");
       setJoinError("");
       return;
     }
+
     try {
       setJoiningRoomId(room.id);
       await joinRoom.mutateAsync(room.id);
+      setLeftRoomId(null);
+      await refetch();
+      setActiveRoomId(room.id);
       navigate(`/voice/${room.id}`);
     } catch (error: any) {
+      const errorMessage =
+        error?.response?.data?.message || error?.message || "";
+      if (
+        errorMessage.includes("already in room") ||
+        errorMessage.includes("already in the room")
+      ) {
+        await refetch();
+        setLeftRoomId(null);
+        setActiveRoomId(room.id);
+        navigate(`/voice/${room.id}`);
+        return;
+      }
       toast.error(error.response?.data?.message || "Failed to join room");
     } finally {
       setJoiningRoomId(null);
@@ -950,6 +1510,9 @@ export const VoicePage = () => {
     try {
       setJoiningRoomId(joinTarget.id);
       await joinRoom.mutateAsync(joinTarget.id);
+      setLeftRoomId(null);
+      await refetch();
+      setActiveRoomId(joinTarget.id);
       navigate(`/voice/${joinTarget.id}`, {
         state: { password: joinPassword },
       });
@@ -964,25 +1527,122 @@ export const VoicePage = () => {
   };
 
   const handleEnd = async (roomId: string) => {
-    if (
-      window.confirm(
-        "End this room for everyone? This action cannot be undone.",
-      )
-    ) {
-      try {
-        await endRoom.mutateAsync(roomId);
-        toast.success("Room ended");
-        refetch();
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || "Failed to end room");
-      }
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: "End Room?",
+      message:
+        "Are you sure you want to end this room? This action cannot be undone and all participants will be disconnected.",
+      confirmText: "Yes, End Room",
+      confirmColor: "#EF4444",
+      onConfirm: async () => {
+        try {
+          await endRoom.mutateAsync(roomId);
+          toast.success("Room ended");
+
+          await refetch();
+
+          setNotifications((prev) => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              message: "Room has been ended",
+              type: "info",
+            },
+          ]);
+          if (miniRoom?.id === roomId) {
+            setShowMiniRoom(false);
+            setMiniRoom(null);
+          }
+          if (activeRoomId === roomId) {
+            setActiveRoomId(null);
+            navigate("/voice");
+          }
+          if (leftRoomId === roomId) {
+            setLeftRoomId(null);
+          }
+        } catch (error: any) {
+          toast.error(error.response?.data?.message || "Failed to end room");
+        }
+      },
+    });
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await refetch();
     setTimeout(() => setRefreshing(false), 1000);
+  };
+
+  // Called after VoiceRoomView has already performed the actual leave API call.
+  // IMPORTANT: do not call leaveRoom.mutateAsync() again here; VoiceRoomView
+  // already does that. Calling it twice can leave stale participant state.
+  const handleRoomLeft = async () => {
+    const roomId = activeRoomId;
+
+    if (!roomId) {
+      navigate("/voice");
+      return;
+    }
+
+    try {
+      // Immediately override stale participant data in the room list.
+      setLeftRoomId(roomId);
+
+      // Refresh after the child component's leave request has completed.
+      await refetch();
+
+      setShowMiniRoom(false);
+      setMiniRoom(null);
+      setActiveRoomId(null);
+      navigate("/voice");
+    } catch (error) {
+      console.error("Error refreshing after leaving room:", error);
+      // Even if refresh fails, the user has already left the room.
+      setShowMiniRoom(false);
+      setMiniRoom(null);
+      setActiveRoomId(null);
+      navigate("/voice");
+    }
+  };
+
+  // Close the minimized room. Unlike handleRoomLeft, this button lives
+  // outside VoiceRoomView, so it must perform the leave API call itself.
+  const handleCloseMiniRoom = async () => {
+    if (!miniRoom?.id) return;
+
+    const roomId = miniRoom.id;
+
+    try {
+      await leaveRoom.mutateAsync(roomId);
+
+      setLeftRoomId(roomId);
+      await refetch();
+
+      setShowMiniRoom(false);
+      setMiniRoom(null);
+      setActiveRoomId(null);
+      navigate("/voice");
+
+      toast.success("Left room");
+    } catch (error: any) {
+      console.error("Error leaving minimized room:", error);
+      toast.error(error?.response?.data?.message || "Failed to leave room");
+    }
+  };
+
+  // IMPORTANT: keep activeRoomId unchanged while minimized.
+  // This keeps VoiceRoomView mounted, so LiveKit and the socket stay connected.
+  const handleMinimizeRoom = (roomData: any) => {
+    setMiniRoom(roomData);
+    setShowMiniRoom(true);
+  };
+
+  const handleMaximizeRoom = () => {
+    if (!miniRoom) return;
+
+    setShowMiniRoom(false);
+    setActiveRoomId(miniRoom.id);
+    navigate(`/voice/${miniRoom.id}`);
   };
 
   const getRoomStatus = (room: VoiceRoom) => {
@@ -1006,167 +1666,205 @@ export const VoicePage = () => {
       SCHEDULED: { label: "Scheduled", icon: Calendar },
     };
 
+  const isUserInRoom = (room: VoiceRoom) => {
+    if (!user?.id) return false;
+
+    // If we just left this room, don't trust a temporarily stale
+    // participants array from the query cache.
+    if (leftRoomId === room.id) return false;
+
+    return room.participants?.some((p: any) => p.userId === user.id) || false;
+  };
+
+  // While minimized, the room component stays mounted but the room list
+  // becomes visible underneath it.
+  const showRoomView = !!activeRoomId && !showMiniRoom;
+
   return (
     <div className="min-h-screen font-sans" style={{ background: COLORS.void }}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <div>
-            <div className="flex items-center gap-3">
-              <span
-                className="text-[10px] font-mono tracking-widest uppercase px-2.5 py-1 rounded-full flex items-center gap-1.5"
-                style={{ background: COLORS.liveDim, color: COLORS.live }}
-              >
-                <span className="relative flex h-1.5 w-1.5">
-                  <span
-                    className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                    style={{ background: COLORS.live }}
-                  />
-                  <span
-                    className="relative inline-flex rounded-full h-1.5 w-1.5"
-                    style={{ background: COLORS.live }}
-                  />
+        {/* Header - Only show when NOT in a room */}
+        {!showRoomView && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+            <div>
+              <div className="flex items-center gap-3">
+                <span
+                  className="text-[10px] font-mono tracking-widest uppercase px-2.5 py-1 rounded-full flex items-center gap-1.5"
+                  style={{ background: COLORS.liveDim, color: COLORS.live }}
+                >
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span
+                      className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                      style={{ background: COLORS.live }}
+                    />
+                    <span
+                      className="relative inline-flex rounded-full h-1.5 w-1.5"
+                      style={{ background: COLORS.live }}
+                    />
+                  </span>
+                  Live Conversations
                 </span>
-                Live Conversations
-              </span>
-            </div>
-            <h1
-              className="font-serif text-2xl sm:text-3xl mt-2 flex items-center gap-2"
-              style={{ color: COLORS.textPrimary }}
-            >
-              Voice Rooms
-              <span
-                className="text-sm font-sans font-normal"
-                style={{ color: COLORS.textMuted }}
-              >
-                · {activeRooms.length} active
-              </span>
-            </h1>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="p-2.5 rounded-xl transition-colors hover:bg-white/5 disabled:opacity-50"
-              style={{ color: COLORS.textMuted }}
-              title="Refresh"
-            >
-              <RefreshCw
-                className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
-              />
-            </button>
-
-            <div className="flex items-center gap-1 bg-white/5 rounded-xl p-1">
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`p-1.5 rounded-lg transition-colors ${viewMode === "grid" ? "bg-white/10" : ""}`}
-                style={{
-                  color:
-                    viewMode === "grid" ? COLORS.textPrimary : COLORS.textMuted,
-                }}
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                className={`p-1.5 rounded-lg transition-colors ${viewMode === "list" ? "bg-white/10" : ""}`}
-                style={{
-                  color:
-                    viewMode === "list" ? COLORS.textPrimary : COLORS.textMuted,
-                }}
-              >
-                <List className="w-4 h-4" />
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowFilter(!showFilter)}
-              className={`p-2.5 rounded-xl transition-colors ${showFilter ? "bg-white/10" : "hover:bg-white/5"}`}
-              style={{
-                color: showFilter ? COLORS.spotlight : COLORS.textMuted,
-              }}
-            >
-              <Filter className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => setShowCreate(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full font-semibold text-sm transition-all hover:scale-105"
-              style={{ background: COLORS.spotlight, color: COLORS.void }}
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Create Room</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Search & Filter Bar */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search
-              className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2"
-              style={{ color: COLORS.textMuted }}
-            />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search rooms..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border outline-none text-sm transition-colors focus:border-[#F5A623]"
-              style={{
-                background: COLORS.surface,
-                borderColor: COLORS.border,
-                color: COLORS.textPrimary,
-                placeholderColor: COLORS.textMuted,
-              }}
-            />
-          </div>
-
-          <AnimatePresence>
-            {showFilter && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex flex-wrap gap-2 overflow-hidden"
-              >
-                {Object.entries(TYPE_ACCENTS).map(([type, color]) => (
-                  <button
-                    key={type}
-                    onClick={() =>
-                      setFilterType(filterType === type ? null : type)
-                    }
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${filterType === type ? "ring-2 ring-offset-2" : ""}`}
-                    style={{
-                      background:
-                        filterType === type ? color : COLORS.surfaceRaised,
-                      color:
-                        filterType === type ? COLORS.void : COLORS.textMuted,
-                      ringColor: color,
-                    }}
+                {activeRooms.length > 0 && (
+                  <span
+                    className="text-[10px] font-mono px-2 py-0.5 rounded-full"
+                    style={{ background: COLORS.liveDim, color: COLORS.live }}
                   >
-                    {TYPE_LABELS[type] || type}
-                  </button>
-                ))}
-                {filterType && (
-                  <button
-                    onClick={() => setFilterType(null)}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium"
-                    style={{
-                      background: COLORS.surfaceRaised,
-                      color: COLORS.textMuted,
-                    }}
-                  >
-                    Clear
-                  </button>
+                    {activeRooms.length} active
+                  </span>
                 )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+              </div>
+              <h1
+                className="font-serif text-2xl sm:text-3xl mt-2 flex items-center gap-2"
+                style={{ color: COLORS.textPrimary }}
+              >
+                Voice Rooms
+                <span
+                  className="text-sm font-sans font-normal"
+                  style={{ color: COLORS.textMuted }}
+                >
+                  · {activeRooms.length} active
+                </span>
+              </h1>
+            </div>
 
-        {/* Loading */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="p-2.5 rounded-xl transition-colors hover:bg-white/5 disabled:opacity-50"
+                style={{ color: COLORS.textMuted }}
+                title="Refresh"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+                />
+              </button>
+
+              <div className="flex items-center gap-1 bg-white/5 rounded-xl p-1">
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    viewMode === "grid" ? "bg-white/10" : ""
+                  }`}
+                  style={{
+                    color:
+                      viewMode === "grid"
+                        ? COLORS.textPrimary
+                        : COLORS.textMuted,
+                  }}
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode("list")}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    viewMode === "list" ? "bg-white/10" : ""
+                  }`}
+                  style={{
+                    color:
+                      viewMode === "list"
+                        ? COLORS.textPrimary
+                        : COLORS.textMuted,
+                  }}
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
+
+              <button
+                onClick={() => setShowFilter(!showFilter)}
+                className={`p-2.5 rounded-xl transition-colors ${
+                  showFilter ? "bg-white/10" : "hover:bg-white/5"
+                }`}
+                style={{
+                  color: showFilter ? COLORS.spotlight : COLORS.textMuted,
+                }}
+              >
+                <Filter className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => setShowCreate(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full font-semibold text-sm transition-all hover:scale-105"
+                style={{ background: COLORS.spotlight, color: COLORS.void }}
+              >
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Create Room</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Search & Filter Bar - Only show when NOT in a room */}
+        {!showRoomView && (
+          <div className="mb-6 flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search
+                className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2"
+                style={{ color: COLORS.textMuted }}
+              />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search rooms..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border outline-none text-sm transition-colors focus:border-[#F5A623]"
+                style={{
+                  background: COLORS.surface,
+                  borderColor: COLORS.border,
+                  color: COLORS.textPrimary,
+                  placeholderColor: COLORS.textMuted,
+                }}
+              />
+            </div>
+
+            <AnimatePresence>
+              {showFilter && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-wrap gap-2 overflow-hidden"
+                >
+                  {Object.entries(TYPE_ACCENTS).map(([type, color]) => (
+                    <button
+                      key={type}
+                      onClick={() =>
+                        setFilterType(filterType === type ? null : type)
+                      }
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                        filterType === type ? "ring-2 ring-offset-2" : ""
+                      }`}
+                      style={{
+                        background:
+                          filterType === type ? color : COLORS.surfaceRaised,
+                        color:
+                          filterType === type ? COLORS.void : COLORS.textMuted,
+                        ringColor: color,
+                      }}
+                    >
+                      {TYPE_LABELS[type] || type}
+                    </button>
+                  ))}
+                  {filterType && (
+                    <button
+                      onClick={() => setFilterType(null)}
+                      className="px-3 py-1.5 rounded-full text-xs font-medium"
+                      style={{
+                        background: COLORS.surfaceRaised,
+                        color: COLORS.textMuted,
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Main Content */}
         {isLoading ? (
           <div
             className={
@@ -1206,8 +1904,8 @@ export const VoicePage = () => {
             ))}
           </div>
         ) : (
+          // Show the room list
           <>
-            {/* Active Rooms */}
             {filteredRooms.length > 0 ? (
               <div
                 className={
@@ -1218,7 +1916,6 @@ export const VoicePage = () => {
               >
                 {filteredRooms.map((room) => {
                   const type = typeConfig[room.type] || typeConfig.OPEN;
-                  const TypeIcon = type.icon;
                   const accent = TYPE_ACCENTS[room.type] || TYPE_ACCENTS.OPEN;
                   const isCreator = room.creatorId === user?.id;
                   const isFull =
@@ -1229,193 +1926,34 @@ export const VoicePage = () => {
                   );
                   const isJoining = joiningRoomId === room.id;
                   const status = getRoomStatus(room);
-                  const StatusIcon = status.icon;
                   const participantCount = room.participants?.length || 0;
                   const hasMoreParticipants =
                     (room.participants?.length || 0) > 4;
+                  const currentUserInRoom = isUserInRoom(room);
 
                   return (
-                    <motion.div
+                    <RoomCard
                       key={room.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="group rounded-2xl border overflow-hidden transition-all hover:border-opacity-70"
-                      style={{
-                        background: COLORS.surface,
-                        borderColor: COLORS.border,
+                      room={room}
+                      isCreator={isCreator}
+                      isFull={isFull}
+                      isJoining={isJoining}
+                      onJoin={() => handleJoinRoom(room)}
+                      onEnd={() => handleEnd(room.id)}
+                      onCopyLink={() => {
+                        navigator.clipboard.writeText(
+                          `${window.location.origin}/voice/${room.id}`,
+                        );
+                        toast.success("🔗 Room link copied!");
                       }}
-                    >
-                      <div className="h-1" style={{ background: accent }} />
-                      <div className="p-5">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3
-                                className="font-serif text-lg truncate"
-                                style={{ color: COLORS.textPrimary }}
-                              >
-                                {room.name}
-                              </h3>
-                              {isCreator && (
-                                <span
-                                  className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1"
-                                  style={{
-                                    background: COLORS.spotlightDim,
-                                    color: COLORS.spotlight,
-                                  }}
-                                >
-                                  <Crown className="w-3 h-3" /> Host
-                                </span>
-                              )}
-                            </div>
-                            {room.description && (
-                              <p
-                                className="text-sm mt-1 line-clamp-2"
-                                style={{ color: COLORS.textMuted }}
-                              >
-                                {room.description}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span
-                              className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded-full"
-                              style={{
-                                background: `${accent}22`,
-                                color: accent,
-                              }}
-                            >
-                              <TypeIcon className="w-3 h-3" />
-                              {type.label}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-4 mt-3 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            {previewParticipants.length > 0 && (
-                              <div className="flex items-center -space-x-2">
-                                {previewParticipants.map((p: any) => {
-                                  const hue = hueFromString(
-                                    p.user?.name || "?",
-                                  );
-                                  return (
-                                    <div
-                                      key={p.id}
-                                      className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-semibold border-2 transition-all group-hover:border-opacity-100"
-                                      style={{
-                                        background: `hsl(${hue}, 35%, 24%)`,
-                                        borderColor: COLORS.surface,
-                                        color: COLORS.textPrimary,
-                                      }}
-                                      title={p.user?.name || "Unknown"}
-                                    >
-                                      {initials(p.user?.name || "?")}
-                                    </div>
-                                  );
-                                })}
-                                {hasMoreParticipants && (
-                                  <div
-                                    className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-semibold border-2"
-                                    style={{
-                                      background: COLORS.surfaceRaised,
-                                      borderColor: COLORS.surface,
-                                      color: COLORS.textMuted,
-                                    }}
-                                  >
-                                    +{participantCount - 4}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            <span
-                              className="text-xs font-mono"
-                              style={{ color: COLORS.textMuted }}
-                            >
-                              {participantCount}/{room.maxParticipants || 50}
-                            </span>
-                          </div>
-
-                          <span
-                            className="inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full"
-                            style={{
-                              background: `${status.color}22`,
-                              color: status.color,
-                            }}
-                          >
-                            <StatusIcon className="w-3 h-3" />
-                            {status.label}
-                          </span>
-
-                          {room.scheduledFor && (
-                            <span
-                              className="text-xs font-mono"
-                              style={{ color: COLORS.textMuted }}
-                            >
-                              <Clock className="w-3 h-3 inline mr-1" />
-                              {new Date(room.scheduledFor).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-
-                        <div
-                          className="flex items-center gap-2 mt-4 pt-3 border-t"
-                          style={{ borderColor: COLORS.border }}
-                        >
-                          {isCreator ? (
-                            <button
-                              onClick={() => handleEnd(room.id)}
-                              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors hover:bg-white/5 flex-1 justify-center"
-                              style={{
-                                borderColor: COLORS.border,
-                                color: COLORS.textMuted,
-                              }}
-                            >
-                              <Square className="w-3.5 h-3.5" />
-                              End Room
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleJoin(room)}
-                              disabled={isFull || isJoining}
-                              className="inline-flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex-1 justify-center"
-                              style={{
-                                background: isFull ? COLORS.textMuted : accent,
-                                color: isFull ? COLORS.void : COLORS.void,
-                              }}
-                            >
-                              {isJoining ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : room.type === "PRIVATE" ? (
-                                <Lock className="w-4 h-4" />
-                              ) : (
-                                <LogIn className="w-4 h-4" />
-                              )}
-                              {isJoining
-                                ? "Joining..."
-                                : isFull
-                                  ? "Full"
-                                  : "Join Room"}
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(
-                                `${window.location.origin}/voice/${room.id}`,
-                              );
-                              toast.success("Room link copied!");
-                            }}
-                            className="p-2 rounded-full transition-colors hover:bg-white/5"
-                            style={{ color: COLORS.textMuted }}
-                            title="Copy link"
-                          >
-                            <Share2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </motion.div>
+                      accent={accent}
+                      typeConfig={type}
+                      status={status}
+                      participantCount={participantCount}
+                      previewParticipants={previewParticipants}
+                      hasMoreParticipants={hasMoreParticipants}
+                      currentUserInRoom={currentUserInRoom}
+                    />
                   );
                 })}
               </div>
@@ -1455,7 +1993,10 @@ export const VoicePage = () => {
                 <button
                   onClick={() => setShowCreate(true)}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full font-semibold text-sm"
-                  style={{ background: COLORS.spotlight, color: COLORS.void }}
+                  style={{
+                    background: COLORS.spotlight,
+                    color: COLORS.void,
+                  }}
                 >
                   <Plus className="w-4 h-4" />
                   Create your first room
@@ -1463,7 +2004,7 @@ export const VoicePage = () => {
               </div>
             )}
 
-            {/* Ended Rooms */}
+            {/* Ended Rooms - Collapsible */}
             {endedRooms.length > 0 && (
               <div
                 className="mt-8 pt-4 border-t"
@@ -1525,15 +2066,63 @@ export const VoicePage = () => {
         )}
       </div>
 
+      {/* Persistent VoiceRoomView
+          It stays mounted while minimized so LiveKit + WebSocket remain connected. */}
+      {activeRoomId && (
+        <div
+          className={
+            showMiniRoom
+              ? "fixed inset-0 z-0 opacity-0 pointer-events-none"
+              : "fixed inset-0 z-50 bg-black/95"
+          }
+          aria-hidden={showMiniRoom}
+        >
+          <VoiceRoomView
+            key={activeRoomId}
+            roomId={activeRoomId}
+            onLeave={handleRoomLeft}
+            onMinimize={handleMinimizeRoom}
+          />
+        </div>
+      )}
+
       {/* Create Room Modal */}
       <CreateRoomModal
         isOpen={showCreate}
-        onClose={() => setShowCreate(false)}
+        onClose={() => {
+          setShowCreate(false);
+          setIsCreateMinimized(false);
+        }}
         onCreate={handleCreate}
         isPending={createRoom.isPending}
+        onMinimize={() => setIsCreateMinimized(true)}
+        isMinimized={isCreateMinimized}
       />
 
-      {/* Join Password Modal */}
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText}
+        confirmColor={confirmModal.confirmColor}
+      />
+
+      {/* Floating Mini Room */}
+      <AnimatePresence>
+        {showMiniRoom && miniRoom && (
+          <FloatingMiniRoom
+            room={miniRoom}
+            onJoin={handleMaximizeRoom}
+            onClose={handleCloseMiniRoom}
+            onMaximize={handleMaximizeRoom}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Join Password Modal - Simplified */}
       <AnimatePresence>
         {joinTarget && (
           <motion.div
@@ -1653,3 +2242,5 @@ export const VoicePage = () => {
     </div>
   );
 };
+
+export default VoicePage;

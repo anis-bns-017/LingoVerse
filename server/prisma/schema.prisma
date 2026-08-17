@@ -478,7 +478,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relations
+  // ===== EXISTING RELATIONS =====
   profile                Profile?
   settings               Settings?
   sessions               Session[]
@@ -494,7 +494,6 @@ model User {
   reactions              Reaction[]
   readReceipts           ReadReceipt[]
   messageTranslations    MessageTranslation[]
-  // ---- FIX: removed voiceRooms and added createdRooms with relation ----
   createdRooms           VoiceRoom[]             @relation("RoomCreator")
   voiceParticipants      VoiceParticipant[]
   voiceRoomMessages      VoiceRoomMessage[]
@@ -554,6 +553,15 @@ model User {
   threadMessages         ThreadMessage[]
   courses                Course[]
   courseReviews          CourseReview[]
+
+  // ===== NEW VOICE RELATIONS (EACH ONLY ONCE!) =====
+  voiceTranscriptions VoiceTranscription[] @relation("TranscriptionUser")
+  voiceClapsSent      VoiceClap[]          @relation("ClapSender")
+  voiceClapsReceived  VoiceClap[]          @relation("ClapReceiver")
+  voiceSpeakerQueues  VoiceSpeakerQueue[]  @relation("QueueUser")
+  voiceInvitesCreated VoiceRoomInvite[]    @relation("InviteCreator")
+  voiceSpeakerStats   VoiceSpeakerStats[]  @relation("SpeakerStatsUser")
+  voiceQueueInvites   VoiceSpeakerQueue[]  @relation("QueueInviter")
 }
 
 model Session {
@@ -1576,19 +1584,29 @@ model VoiceRoom {
   endedAt         DateTime?
   maxParticipants Int           @default(50)
   isRecording     Boolean       @default(false)
-  liveKitRoomId   String? // LiveKit room name
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  liveKitRoomId   String?
   language        String?
   categories      String[]
   tags            String[]
   topics          String[]
   trendScore      Float         @default(0)
 
+  // EXISTING RELATIONS
   participants VoiceParticipant[]
   recordings   Recording[]
   stages       Stage[]
   messages     VoiceRoomMessage[]
+
+  // ===== NEW RELATIONS (EACH ONLY ONCE!) =====
+  transcriptions VoiceTranscription[]
+  claps          VoiceClap[]
+  queue          VoiceSpeakerQueue[]
+  invites        VoiceRoomInvite[]
+  analytics      VoiceRoomAnalytics[]
+  speakerStats   VoiceSpeakerStats[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model VoiceParticipant {
@@ -1878,5 +1896,134 @@ model StudyPlan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([userId])
+}
+
+model VoiceTranscription {
+  id         String    @id @default(cuid())
+  roomId     String
+  room       VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?     @relation("TranscriptionUser", fields: [userId], references: [id])
+  text       String    @db.Text
+  language   String    @default("en")
+  isFinal    Boolean   @default(false)
+  speaker    String?
+  confidence Float?
+  timestamp  DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+
+  translations VoiceTranslation[]
+
+  @@index([roomId])
+  @@index([userId])
+  @@index([timestamp])
+  @@index([language])
+}
+
+model VoiceTranslation {
+  id              String             @id @default(cuid())
+  transcriptionId String
+  transcription   VoiceTranscription @relation(fields: [transcriptionId], references: [id], onDelete: Cascade)
+  sourceLanguage  String
+  targetLanguage  String
+  translatedText  String             @db.Text
+  confidence      Float?
+  createdAt       DateTime           @default(now())
+
+  @@index([transcriptionId])
+  @@index([sourceLanguage])
+  @@index([targetLanguage])
+}
+
+model VoiceClap {
+  id           String    @id @default(cuid())
+  roomId       String
+  room         VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation("ClapSender", fields: [userId], references: [id], onDelete: Cascade)
+  targetUserId String?
+  targetUser   User?     @relation("ClapReceiver", fields: [targetUserId], references: [id])
+  clapCount    Int       @default(1)
+  createdAt    DateTime  @default(now())
+
+  @@unique([roomId, userId, targetUserId])
+  @@index([roomId])
+  @@index([userId])
+  @@index([targetUserId])
+}
+
+model VoiceSpeakerQueue {
+  id            String    @id @default(cuid())
+  roomId        String
+  room          VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation("QueueUser", fields: [userId], references: [id], onDelete: Cascade)
+  position      Int
+  status        String    @default("PENDING")
+  invitedBy     String?
+  invitedByUser User?     @relation("QueueInviter", fields: [invitedBy], references: [id])
+  joinedAt      DateTime?
+  leftAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+  @@index([position])
+}
+
+model VoiceRoomInvite {
+  id          String    @id @default(cuid())
+  roomId      String
+  room        VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  code        String    @unique
+  createdById String
+  createdBy   User      @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  maxUses     Int       @default(10)
+  uses        Int       @default(0)
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([roomId])
+  @@index([code])
+}
+
+model VoiceRoomAnalytics {
+  id               String    @id @default(cuid())
+  roomId           String
+  room             VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  totalListeners   Int       @default(0)
+  totalSpeakers    Int       @default(0)
+  averageListeners Int       @default(0)
+  peakListeners    Int       @default(0)
+  totalDuration    Int       @default(0)
+  totalClaps       Int       @default(0)
+  engagementRate   Float     @default(0)
+  retentionRate    Float     @default(0)
+  timestamp        DateTime  @default(now())
+
+  @@index([roomId])
+  @@index([timestamp])
+}
+
+model VoiceSpeakerStats {
+  id            String    @id @default(cuid())
+  roomId        String
+  room          VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation("SpeakerStatsUser", fields: [userId], references: [id], onDelete: Cascade)
+  speakingTime  Int       @default(0)
+  timesSpoken   Int       @default(0)
+  clapsReceived Int       @default(0)
+  rating        Float?
+  isStarSpeaker Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([roomId, userId])
+  @@index([roomId])
   @@index([userId])
 }

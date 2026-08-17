@@ -5,7 +5,6 @@ import { RegisterPage } from "../pages/RegisterPage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { ProfilePage } from "../pages/ProfilePage";
 import { SettingsPage } from "../pages/SettingsPage";
-// ---------- NEW IMPORTS ----------
 import { VocabularyPage } from "../pages/VocabularyPage";
 import { FlashcardPage } from "../pages/FlashcardPage";
 import { GrammarPage } from "../pages/GrammarPage";
@@ -16,8 +15,8 @@ import { SuggestionsPage } from "../pages/SuggestionsPage";
 import { BlockedPage } from "../pages/BlockedPage";
 import { ChatPage } from "../pages/ChatPage";
 import { VoicePage } from "../pages/VoicePage";
-import { VoiceRoomView } from "../components/voice/VoiceRoomView";
-import { VoiceRoomPage } from "../components/voice/VoiceRoomPage";
+// ❌ Remove VoiceRoomView import if not using it directly
+// import { VoiceRoomView } from "../components/voice/VoiceRoomView";
 import { CommunitiesPage } from "../pages/CommunitiesPage";
 import { CommunityPage } from "../pages/CommunityPage";
 import { JoinCommunityPage } from "../pages/JoinCommunityPage";
@@ -37,8 +36,11 @@ export const AppRoutes = () => {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+
+        {/* Protected Routes */}
         <Route
           path="/"
           element={
@@ -63,6 +65,8 @@ export const AppRoutes = () => {
             </ProtectedRoute>
           }
         />
+
+        {/* Learning Routes */}
         <Route
           path="/vocabulary"
           element={
@@ -104,6 +108,7 @@ export const AppRoutes = () => {
           }
         />
 
+        {/* Social Routes */}
         <Route
           path="/friends"
           element={
@@ -129,6 +134,7 @@ export const AppRoutes = () => {
           }
         />
 
+        {/* Chat Routes */}
         <Route
           path="/chat"
           element={
@@ -137,7 +143,16 @@ export const AppRoutes = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/chat/new"
+          element={
+            <ProtectedRoute>
+              <NewConversationPage />
+            </ProtectedRoute>
+          }
+        />
 
+        {/* ✅ Voice Routes - Both use VoicePage */}
         <Route
           path="/voice"
           element={
@@ -150,11 +165,12 @@ export const AppRoutes = () => {
           path="/voice/:roomId"
           element={
             <ProtectedRoute>
-              <VoiceRoomPage />
+              <VoicePage />
             </ProtectedRoute>
           }
         />
 
+        {/* Community Routes */}
         <Route
           path="/communities"
           element={
@@ -180,15 +196,7 @@ export const AppRoutes = () => {
           }
         />
 
-        <Route
-          path="/chat/new"
-          element={
-            <ProtectedRoute>
-              <NewConversationPage />
-            </ProtectedRoute>
-          }
-        />
-
+        {/* Discovery Route */}
         <Route
           path="/discover"
           element={
@@ -198,6 +206,7 @@ export const AppRoutes = () => {
           }
         />
 
+        {/* Catch all */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>

@@ -557,16 +557,90 @@ export const useSearchMessages = (chatId: string, query: string) => {
 
 // ============ WEBSOCKET HOOK ============
 
-// ✅ HARDCODE THE URL - THIS IS THE SIMPLEST FIX
-const SOCKET_URL = "http://localhost:3000";
-console.log("🔌 Socket URL:", SOCKET_URL);
+/**
+ * Socket.IO connection settings.
+ *
+ * IMPORTANT:
+ * - Do not send `token=undefined` in the URL/query string.
+ * - `withCredentials: true` allows an HttpOnly authentication cookie to be
+ *   sent by Firefox/Brave as well as Chromium browsers.
+ * - Polling is intentionally listed first. Socket.IO can then upgrade to
+ *   WebSocket after the initial authenticated handshake. This is more
+ *   tolerant of browser/proxy/WebSocket differences during development.
+ */
+const SOCKET_URL = (
+  import.meta.env.VITE_API_URL || "http://localhost:3000"
+).replace(/\/+$/, "");
+
+const CHAT_SOCKET_NAMESPACE = "/chat";
+
+const getStoredToken = (): string | null => {
+  if (typeof window === "undefined") return null;
+
+  const isUsable = (value: string | null | undefined): value is string => {
+    if (!value) return false;
+    const normalized = value.trim();
+    return (
+      normalized.length > 0 &&
+      normalized !== "undefined" &&
+      normalized !== "null"
+    );
+  };
+
+  try {
+    const localToken =
+      window.localStorage.getItem("accessToken") ||
+      window.localStorage.getItem("token");
+
+    if (isUsable(localToken)) return localToken.trim();
+
+    const sessionToken =
+      window.sessionStorage.getItem("accessToken") ||
+      window.sessionStorage.getItem("token");
+
+    if (isUsable(sessionToken)) return sessionToken.trim();
+
+    // This works only for non-HttpOnly cookies. HttpOnly cookies are still
+    // automatically sent because the socket uses withCredentials: true.
+    const cookieToken = document.cookie
+      .split(";")
+      .map((cookie) => cookie.trim())
+      .map((cookie) => {
+        const separator = cookie.indexOf("=");
+        if (separator === -1) return null;
+        return {
+          name: cookie.slice(0, separator),
+          value: cookie.slice(separator + 1),
+        };
+      })
+      .find(
+        (cookie) =>
+          cookie &&
+          (cookie.name === "accessToken" || cookie.name === "token") &&
+          isUsable(cookie.value),
+      );
+
+    if (cookieToken && isUsable(cookieToken.value)) {
+      return decodeURIComponent(cookieToken.value).trim();
+    }
+  } catch (error) {
+    console.warn("⚠️ Unable to read stored authentication token:", error);
+  }
+
+  return null;
+};
 
 export const useChatSocket = (
   chatId: string | null,
   userId: string,
   options?: {
     onNewMessage?: (message: Message) => void;
-    onMessageDeleted?: (data: { messageId: string; userId: string }) => void;
+    onMessageDeleted?: (data: {
+      messageId: string;
+      userId: string;
+      chatId?: string;
+      communityId?: string;
+    }) => void;
     onMessageEdited?: (message: Message) => void;
     onReaction?: (reaction: Reaction) => void;
   },
@@ -576,162 +650,185 @@ export const useChatSocket = (
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
+
   const queryClient = useQueryClient();
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ✅ ADD THESE REFS
-  const isConnectingRef = useRef(false);
   const socketRef = useRef<Socket | null>(null);
+  const isConnectingRef = useRef(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectToastShownRef = useRef(false);
 
-  const getToken = useCallback(() => {
-    try {
-      let token =
-        localStorage.getItem("accessToken") || localStorage.getItem("token");
+  const getToken = useCallback(() => getStoredToken(), []);
 
-      if (token && token !== "undefined" && token !== "null") {
-        return token;
-      }
-
-      token =
-        sessionStorage.getItem("accessToken") ||
-        sessionStorage.getItem("token");
-
-      if (token && token !== "undefined" && token !== "null") {
-        return token;
-      }
-
-      const cookies = document.cookie.split("; ");
-      for (const cookie of cookies) {
-        const [name, value] = cookie.split("=");
-        if (name === "accessToken" || name === "token") {
-          if (value && value !== "undefined" && value !== "null") {
-            return value;
-          }
-        }
-      }
-
-      return null;
-    } catch (e) {
-      console.warn("⚠️ Error getting token:", e);
-      return null;
-    }
-  }, []);
-
-  // ✅ Effect for joining/leaving rooms (does NOT reconnect)
+  // Keep the current chat room synchronized without recreating the socket.
   useEffect(() => {
-    if (!socketRef.current || !isConnected || !chatId) return;
+    const currentSocket = socketRef.current;
+
+    if (!currentSocket?.connected || !chatId) return;
 
     console.log(`📚 Joining chat room: ${chatId}`);
-    socketRef.current.emit("chat:join", { chatId });
+    currentSocket.emit("chat:join", { chatId });
 
     return () => {
-      if (socketRef.current && isConnected) {
+      if (currentSocket.connected) {
         console.log(`📚 Leaving chat room: ${chatId}`);
-        socketRef.current.emit("chat:leave", { chatId });
+        currentSocket.emit("chat:leave", { chatId });
       }
     };
   }, [chatId, isConnected]);
 
-  // ✅ MAIN SOCKET CONNECTION - ONLY RUNS ONCE
+  // Create exactly one socket per userId.
   useEffect(() => {
     if (!userId) {
-      console.log("⏳ Waiting for userId to connect socket");
+      console.log("⏳ Waiting for userId before connecting chat socket");
       return;
     }
 
-    // ✅ Prevent multiple connection attempts
+    if (typeof window === "undefined") return;
+
+    if (socketRef.current?.connected) {
+      console.log("✅ Chat socket already connected");
+      return;
+    }
+
     if (isConnectingRef.current) {
-      console.log("⏳ Already connecting, skipping...");
-      return;
-    }
-
-    // ✅ Skip if already connected
-    if (socketRef.current && socketRef.current.connected) {
-      console.log("✅ Socket already connected, skipping...");
+      console.log("⏳ Chat socket connection already in progress");
       return;
     }
 
     isConnectingRef.current = true;
 
     const token = getToken();
-    console.log("🔑 Token retrieved:", token ? "✅ Present" : "❌ Missing");
 
-    const socketUrl = "http://localhost:3000";
-    console.log(`🔌 Connecting to: ${socketUrl}/chat`);
+    console.log(
+      "🔑 Chat authentication:",
+      token
+        ? "stored token present"
+        : "no JS-readable token; using credentials/cookies",
+    );
+    console.log(`🔌 Connecting to: ${SOCKET_URL}${CHAT_SOCKET_NAMESPACE}`);
 
-    const s = io(`${socketUrl}/chat`, {
+    // Build auth without undefined values. This is the critical difference
+    // from the previous implementation, which generated token=undefined.
+    const auth: Record<string, string> = {};
+    if (token) auth.token = token;
+
+    const query: Record<string, string> = {
+      userId,
+    };
+    if (token) query.token = token;
+
+    const s = io(`${SOCKET_URL}${CHAT_SOCKET_NAMESPACE}`, {
       withCredentials: true,
-      transports: ["websocket", "polling"],
+
+      // Start with polling, then allow Socket.IO to upgrade to WebSocket.
+      // This avoids an immediate Firefox/Brave WebSocket failure from
+      // preventing the authenticated connection from being established.
+      transports: ["polling", "websocket"],
+      upgrade: true,
+
+      auth,
+      query,
+
       reconnection: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      randomizationFactor: 0.25,
       timeout: 20000,
-      auth: {
-        token: token || undefined,
-      },
-      query: {
-        userId: userId,
-        token: token || undefined,
-      },
+
+      // Prevent stale socket state from being reused between attempts.
+      forceNew: true,
     });
 
     socketRef.current = s;
     setSocket(s);
 
-    s.on("connect", () => {
+    const handleConnect = () => {
       console.log("✅ Connected to chat socket", s.id);
+
+      isConnectingRef.current = false;
+      reconnectToastShownRef.current = false;
       setIsConnected(true);
       setReconnectAttempts(0);
-      isConnectingRef.current = false;
 
       if (chatId) {
         console.log(`📚 Joining chat room: ${chatId}`);
         s.emit("chat:join", { chatId });
       }
-    });
+    };
 
-    s.on("disconnect", (reason) => {
+    const handleDisconnect = (reason: string) => {
       console.log(`❌ Disconnected from chat socket: ${reason}`);
       setIsConnected(false);
 
+      // Socket.IO normally reconnects automatically. Do not call connect()
+      // manually here because that can create duplicate connection attempts.
       if (reason === "io server disconnect") {
-        console.log("🔄 Server disconnected, attempting to reconnect...");
-        setTimeout(() => {
-          if (s.disconnected) {
+        console.log("🔄 Server requested disconnect; reconnecting...");
+        reconnectTimerRef.current = setTimeout(() => {
+          if (s.disconnected && !s.active) {
             s.connect();
           }
         }, 1000);
       }
-    });
+    };
 
-    s.on("connect_error", (err) => {
-      console.error("❌ Chat socket connection error:", err.message);
+    const handleConnectError = (error: Error) => {
+      const nextAttempt = reconnectAttempts + 1;
+
+      console.error("❌ Chat socket connection error:", error.message);
+      console.error("🔎 Socket transport:", s.io.engine?.transport?.name);
+      console.error(
+        "🔎 Authentication:",
+        token ? "token supplied" : "credential/cookie mode",
+      );
+
       setIsConnected(false);
-      setReconnectAttempts((prev) => prev + 1);
+      setReconnectAttempts(nextAttempt);
       isConnectingRef.current = false;
 
-      if (reconnectAttempts >= 5) {
-        toast.error(
-          "Failed to connect to chat server. Please refresh the page.",
-        );
+      // Authentication failures should not be hidden behind endless retries.
+      const message = error.message?.toLowerCase() || "";
+      const looksLikeAuthError =
+        message.includes("unauthorized") ||
+        message.includes("forbidden") ||
+        message.includes("jwt") ||
+        message.includes("token") ||
+        message.includes("authentication");
+
+      if (looksLikeAuthError && !reconnectToastShownRef.current) {
+        reconnectToastShownRef.current = true;
+        toast.error("Chat authentication failed. Please sign in again.");
       }
-    });
+    };
 
-    s.on("reconnect", (attemptNumber) => {
-      console.log(`🔄 Reconnected after ${attemptNumber} attempts`);
-      setIsConnected(true);
-      setReconnectAttempts(0);
-      isConnectingRef.current = false;
-    });
-
-    s.on("reconnect_failed", () => {
-      console.error("❌ All reconnection attempts failed");
-      toast.error(
-        "Unable to connect to chat server. Please check your connection.",
+    const handleReconnect = (attemptNumber: number) => {
+      console.log(
+        `🔄 Chat socket reconnected after ${attemptNumber} attempt(s)`,
       );
       isConnectingRef.current = false;
-    });
+      setIsConnected(true);
+      setReconnectAttempts(0);
+      reconnectToastShownRef.current = false;
+    };
+
+    const handleReconnectError = (error: Error) => {
+      console.error("❌ Chat socket reconnect error:", error.message);
+    };
+
+    const handleReconnectFailed = () => {
+      console.error("❌ Chat socket reconnection stopped");
+      isConnectingRef.current = false;
+    };
+
+    s.on("connect", handleConnect);
+    s.on("disconnect", handleDisconnect);
+    s.on("connect_error", handleConnectError);
+    s.io.on("reconnect", handleReconnect);
+    s.io.on("reconnect_error", handleReconnectError);
+    s.io.on("reconnect_failed", handleReconnectFailed);
 
     s.on("connection:established", (data) => {
       console.log("✅ Connection established:", data);
@@ -740,12 +837,11 @@ export const useChatSocket = (
     });
 
     // ---------- Message Events ----------
+
     s.on("message:new", (message: Message) => {
       console.log("📩 New message received:", message);
 
-      if (options?.onNewMessage) {
-        options.onNewMessage(message);
-      }
+      options?.onNewMessage?.(message);
 
       const queryKey = message.chatId
         ? ["messages", message.chatId]
@@ -760,6 +856,7 @@ export const useChatSocket = (
           return [...old, message];
         });
       }
+
       queryClient.invalidateQueries({ queryKey: ["chats"] });
     });
 
@@ -777,9 +874,7 @@ export const useChatSocket = (
       }) => {
         console.log("🗑️ Message deleted:", data);
 
-        if (options?.onMessageDeleted) {
-          options.onMessageDeleted(data);
-        }
+        options?.onMessageDeleted?.(data);
 
         const queryKey = data.chatId
           ? ["messages", data.chatId]
@@ -790,10 +885,15 @@ export const useChatSocket = (
         if (queryKey) {
           queryClient.setQueryData<Message[]>(queryKey, (old) => {
             if (!old) return old;
-            return old.map((m) =>
-              m.id === data.messageId
-                ? { ...m, isDeleted: true, content: "Message deleted" }
-                : m,
+
+            return old.map((message) =>
+              message.id === data.messageId
+                ? {
+                    ...message,
+                    isDeleted: true,
+                    content: "Message deleted",
+                  }
+                : message,
             );
           });
         }
@@ -803,9 +903,7 @@ export const useChatSocket = (
     s.on("message:edited", (message: Message) => {
       console.log("✏️ Message edited:", message);
 
-      if (options?.onMessageEdited) {
-        options.onMessageEdited(message);
-      }
+      options?.onMessageEdited?.(message);
 
       const queryKey = message.chatId
         ? ["messages", message.chatId]
@@ -816,10 +914,15 @@ export const useChatSocket = (
       if (queryKey) {
         queryClient.setQueryData<Message[]>(queryKey, (old) => {
           if (!old) return old;
-          return old.map((m) =>
-            m.id === message.id
-              ? { ...m, content: message.content, isEdited: true }
-              : m,
+
+          return old.map((item) =>
+            item.id === message.id
+              ? {
+                  ...item,
+                  content: message.content,
+                  isEdited: true,
+                }
+              : item,
           );
         });
       }
@@ -829,12 +932,16 @@ export const useChatSocket = (
       "message:pinned",
       (data: { messageId: string; pinned: boolean; userId: string }) => {
         console.log("📌 Message pinned:", data);
+
         queryClient.setQueriesData<Message[]>(
           { queryKey: ["messages"] },
           (old) => {
             if (!old) return old;
-            return old.map((m) =>
-              m.id === data.messageId ? { ...m, isPinned: data.pinned } : m,
+
+            return old.map((message) =>
+              message.id === data.messageId
+                ? { ...message, isPinned: data.pinned }
+                : message,
             );
           },
         );
@@ -842,30 +949,31 @@ export const useChatSocket = (
     );
 
     // ---------- Reaction Events ----------
+
     s.on("reaction:new", (reaction: Reaction) => {
       console.log("❤️ New reaction:", reaction);
 
-      if (options?.onReaction) {
-        options.onReaction(reaction);
-      }
+      options?.onReaction?.(reaction);
 
       if (!reaction?.messageId) return;
+
       queryClient.setQueriesData<Message[]>(
         { queryKey: ["messages"] },
         (old) => {
           if (!old) return old;
-          return old.map((m) =>
-            m.id === reaction.messageId
+
+          return old.map((message) =>
+            message.id === reaction.messageId
               ? {
-                  ...m,
+                  ...message,
                   reactions: [
-                    ...m.reactions.filter(
-                      (r: any) => r.userId !== reaction.userId,
+                    ...message.reactions.filter(
+                      (item) => item.userId !== reaction.userId,
                     ),
                     reaction,
                   ],
                 }
-              : m,
+              : message,
           );
         },
       );
@@ -875,20 +983,23 @@ export const useChatSocket = (
       "reaction:removed",
       (data: { messageId: string; userId: string; emoji: string }) => {
         console.log("💔 Reaction removed:", data);
+
         queryClient.setQueriesData<Message[]>(
           { queryKey: ["messages"] },
           (old) => {
             if (!old) return old;
-            return old.map((m) =>
-              m.id === data.messageId
+
+            return old.map((message) =>
+              message.id === data.messageId
                 ? {
-                    ...m,
-                    reactions: m.reactions.filter(
-                      (r: any) =>
-                        r.emoji !== data.emoji || r.userId !== data.userId,
+                    ...message,
+                    reactions: message.reactions.filter(
+                      (reaction) =>
+                        reaction.emoji !== data.emoji ||
+                        reaction.userId !== data.userId,
                     ),
                   }
-                : m,
+                : message,
             );
           },
         );
@@ -900,6 +1011,7 @@ export const useChatSocket = (
     });
 
     // ---------- Read Receipts ----------
+
     s.on(
       "message:read",
       (data: { userId: string; messageId: string; chatId: string }) => {
@@ -908,12 +1020,18 @@ export const useChatSocket = (
     );
 
     // ---------- Typing Events ----------
+
     s.on(
       "typing:start",
       (data: { userId: string; chatId: string; communityId?: string }) => {
         const targetId = data.chatId || data.communityId;
+
         if (targetId === chatId && data.userId !== userId) {
-          setTypingUsers((prev) => new Set(prev).add(data.userId));
+          setTypingUsers((previous) => {
+            const next = new Set(previous);
+            next.add(data.userId);
+            return next;
+          });
         }
       },
     );
@@ -922,9 +1040,10 @@ export const useChatSocket = (
       "typing:stop",
       (data: { userId: string; chatId: string; communityId?: string }) => {
         const targetId = data.chatId || data.communityId;
+
         if (targetId === chatId) {
-          setTypingUsers((prev) => {
-            const next = new Set(prev);
+          setTypingUsers((previous) => {
+            const next = new Set(previous);
             next.delete(data.userId);
             return next;
           });
@@ -933,53 +1052,98 @@ export const useChatSocket = (
     );
 
     // ---------- Presence Events ----------
+
     s.on("user:online", (data: { userId: string }) => {
-      setOnlineUsers((prev) => new Set(prev).add(data.userId));
+      if (!data?.userId) return;
+
+      setOnlineUsers((previous) => {
+        const next = new Set(previous);
+        next.add(data.userId);
+        return next;
+      });
     });
 
     s.on("user:offline", (data: { userId: string }) => {
-      setOnlineUsers((prev) => {
-        const next = new Set(prev);
+      if (!data?.userId) return;
+
+      setOnlineUsers((previous) => {
+        const next = new Set(previous);
         next.delete(data.userId);
         return next;
       });
     });
 
     s.on("users:online", (data: { users: string[] }) => {
-      setOnlineUsers(new Set(data.users));
+      setOnlineUsers(new Set(data?.users || []));
     });
 
-    // ---------- Message Errors ----------
+    // ---------- Socket Errors ----------
+
     s.on("message:error", (data: { error: string }) => {
       toast.error(data.error || "Message failed to send");
     });
 
     s.on("error", (data: { message: string }) => {
-      console.error("Socket error:", data);
-      toast.error(data.message || "Socket error occurred");
+      console.error("❌ Socket error:", data);
+      toast.error(data?.message || "Socket error occurred");
     });
 
-    // ✅ CLEANUP - only runs when userId changes
     return () => {
-      console.log("🧹 Cleaning up socket connection");
+      console.log("🧹 Cleaning up chat socket");
+
       isConnectingRef.current = false;
+
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
 
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = null;
       }
 
-      if (socketRef.current) {
-        socketRef.current.disconnect();
+      // Remove listeners before disconnecting to prevent late events from
+      // updating React state after this hook has been unmounted.
+      s.off("connect", handleConnect);
+      s.off("disconnect", handleDisconnect);
+      s.off("connect_error", handleConnectError);
+      s.off("connection:established");
+
+      s.removeAllListeners("message:new");
+      s.removeAllListeners("message:sent");
+      s.removeAllListeners("message:deleted");
+      s.removeAllListeners("message:edited");
+      s.removeAllListeners("message:pinned");
+      s.removeAllListeners("reaction:new");
+      s.removeAllListeners("reaction:removed");
+      s.removeAllListeners("reaction:error");
+      s.removeAllListeners("message:read");
+      s.removeAllListeners("typing:start");
+      s.removeAllListeners("typing:stop");
+      s.removeAllListeners("user:online");
+      s.removeAllListeners("user:offline");
+      s.removeAllListeners("users:online");
+      s.removeAllListeners("message:error");
+      s.removeAllListeners("error");
+
+      s.io.off("reconnect", handleReconnect);
+      s.io.off("reconnect_error", handleReconnectError);
+      s.io.off("reconnect_failed", handleReconnectFailed);
+
+      s.disconnect();
+
+      if (socketRef.current === s) {
         socketRef.current = null;
       }
 
       setSocket(null);
       setIsConnected(false);
     };
-  }, [userId]); // ✅ ONLY DEPENDS ON userId
+  }, [userId]);
 
   // ---------- Socket Actions ----------
+
   const sendMessage = useCallback(
     (
       payload: Omit<SendMessagePayload, "chatId" | "communityId"> & {
@@ -987,7 +1151,7 @@ export const useChatSocket = (
         communityId?: string;
       },
     ) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
@@ -1010,7 +1174,7 @@ export const useChatSocket = (
       audioUrl: string;
       duration: number;
     }) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
@@ -1027,7 +1191,7 @@ export const useChatSocket = (
 
   const sendTyping = useCallback(
     (isTyping: boolean, targetId?: string, isCommunity: boolean = false) => {
-      if (!socketRef.current || !isConnected) return;
+      if (!socketRef.current?.connected || !isConnected) return;
 
       const id = targetId || chatId;
       if (!id) return;
@@ -1044,7 +1208,7 @@ export const useChatSocket = (
 
       if (isTyping) {
         typingTimeoutRef.current = setTimeout(() => {
-          if (socketRef.current && isConnected) {
+          if (socketRef.current?.connected && isConnected) {
             socketRef.current.emit("typing:stop", payload);
           }
         }, 3000);
@@ -1055,7 +1219,7 @@ export const useChatSocket = (
 
   const emitRead = useCallback(
     (messageId: string, targetId?: string, isCommunity: boolean = false) => {
-      if (!socketRef.current || !isConnected) return;
+      if (!socketRef.current?.connected || !isConnected) return;
 
       const id = targetId || chatId;
       if (!id) return;
@@ -1071,10 +1235,11 @@ export const useChatSocket = (
 
   const deleteMessage = useCallback(
     (messageId: string) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
+
       socketRef.current.emit("message:delete", { messageId });
     },
     [isConnected],
@@ -1082,10 +1247,11 @@ export const useChatSocket = (
 
   const editMessage = useCallback(
     (messageId: string, content: string) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
+
       socketRef.current.emit("message:edit", { messageId, content });
     },
     [isConnected],
@@ -1093,10 +1259,11 @@ export const useChatSocket = (
 
   const pinMessage = useCallback(
     (messageId: string, pinned: boolean) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
+
       socketRef.current.emit("message:pin", { messageId, pinned });
     },
     [isConnected],
@@ -1109,10 +1276,11 @@ export const useChatSocket = (
       limit?: number;
       before?: string;
     }) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
+
       socketRef.current.emit("messages:fetch", params);
     },
     [isConnected],
@@ -1120,10 +1288,11 @@ export const useChatSocket = (
 
   const joinChat = useCallback(
     (chatIdToJoin: string) => {
-      if (!socketRef.current || !isConnected) {
+      if (!socketRef.current?.connected || !isConnected) {
         toast.error("Not connected to chat server");
         return;
       }
+
       socketRef.current.emit("chat:join", { chatId: chatIdToJoin });
     },
     [isConnected],
@@ -1131,14 +1300,15 @@ export const useChatSocket = (
 
   const leaveChat = useCallback(
     (chatIdToLeave: string) => {
-      if (!socketRef.current || !isConnected) return;
+      if (!socketRef.current?.connected || !isConnected) return;
+
       socketRef.current.emit("chat:leave", { chatId: chatIdToLeave });
     },
     [isConnected],
   );
 
   return {
-    socket: socketRef.current,
+    socket,
     isConnected,
     typingUsers,
     onlineUsers,
@@ -1158,17 +1328,55 @@ export const useChatSocket = (
 
 // ============ VOICE MESSAGE RECORDING HOOK ============
 
+const getSupportedAudioMimeType = (): string | undefined => {
+  if (typeof MediaRecorder === "undefined") return undefined;
+
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+  ];
+
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type));
+};
+
 export const useVoiceMessageRecorder = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const startRecording = async () => {
+  const stopTracks = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    if (isRecording) return;
+
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
+      const error = new Error(
+        "This browser does not support microphone recording.",
+      );
+      toast.error("Your browser does not support microphone recording.");
+      throw error;
+    }
+
     try {
+      setAudioBlob(null);
+      chunksRef.current = [];
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -1176,28 +1384,38 @@ export const useVoiceMessageRecorder = () => {
           autoGainControl: true,
         },
       });
+
       streamRef.current = stream;
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm;codecs=opus",
-      });
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
+      const mimeType = getSupportedAudioMimeType();
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data?.size > 0) {
+          chunksRef.current.push(event.data);
         }
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const actualMimeType =
+          mediaRecorder.mimeType || mimeType || "audio/webm";
+
+        const blob = new Blob(chunksRef.current, {
+          type: actualMimeType,
+        });
+
         setAudioBlob(blob);
         chunksRef.current = [];
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-        }
+        stopTracks();
+      };
+
+      mediaRecorder.onerror = (event) => {
+        console.error("❌ MediaRecorder error:", event);
       };
 
       mediaRecorder.start(100);
@@ -1205,66 +1423,92 @@ export const useVoiceMessageRecorder = () => {
       setDuration(0);
 
       timerRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
+        setDuration((previous) => previous + 1);
       }, 1000);
-    } catch (error) {
-      console.error("Failed to start recording:", error);
-      toast.error("Failed to access microphone. Please check permissions.");
-      throw error;
-    }
-  };
+    } catch (error: any) {
+      console.error("❌ Failed to start recording:", error);
 
-  const stopRecording = useCallback((): Promise<Blob> => {
-    return new Promise((resolve) => {
-      if (!mediaRecorderRef.current) {
-        resolve(new Blob());
-        return;
+      stopTracks();
+      setIsRecording(false);
+
+      const name = error?.name;
+
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        toast.error(
+          "Microphone permission was denied. Allow microphone access for this site and try again.",
+        );
+      } else if (name === "NotFoundError") {
+        toast.error("No microphone was found.");
+      } else if (name === "NotReadableError") {
+        toast.error(
+          "Your microphone is already being used by another application.",
+        );
+      } else {
+        toast.error("Failed to access microphone. Please check permissions.");
       }
 
-      if (mediaRecorderRef.current.state === "recording") {
-        mediaRecorderRef.current.stop();
+      throw error;
+    }
+  }, [isRecording, stopTracks]);
+
+  const stopRecording = useCallback(async (): Promise<Blob> => {
+    const recorder = mediaRecorderRef.current;
+
+    if (!recorder) {
+      return audioBlob || new Blob([], { type: "audio/webm" });
+    }
+
+    return new Promise<Blob>((resolve) => {
+      const finish = () => {
+        const result =
+          audioBlob ||
+          new Blob(chunksRef.current, {
+            type: recorder.mimeType || "audio/webm",
+          });
+
+        setAudioBlob(result);
+        resolve(result);
+      };
+
+      if (recorder.state === "recording") {
+        recorder.addEventListener("stop", finish, { once: true });
+        recorder.stop();
+      } else {
+        finish();
       }
 
       setIsRecording(false);
+
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
 
-      const checkBlob = setInterval(() => {
-        if (audioBlob) {
-          clearInterval(checkBlob);
-          resolve(audioBlob);
-        } else {
-          setTimeout(() => {
-            clearInterval(checkBlob);
-            resolve(new Blob());
-          }, 2000);
-        }
-      }, 100);
+      mediaRecorderRef.current = null;
     });
   }, [audioBlob]);
 
   const cancelRecording = useCallback(() => {
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state === "recording"
-    ) {
-      mediaRecorderRef.current.stop();
+    const recorder = mediaRecorderRef.current;
+
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
     }
+
+    mediaRecorderRef.current = null;
+
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
+
+    stopTracks();
+
     setIsRecording(false);
     setDuration(0);
     setAudioBlob(null);
     chunksRef.current = [];
-  }, []);
+  }, [stopTracks]);
 
   useEffect(() => {
     return () => {
@@ -1272,18 +1516,18 @@ export const useVoiceMessageRecorder = () => {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
+
       if (
         mediaRecorderRef.current &&
-        mediaRecorderRef.current.state === "recording"
+        mediaRecorderRef.current.state !== "inactive"
       ) {
         mediaRecorderRef.current.stop();
       }
+
+      mediaRecorderRef.current = null;
+      stopTracks();
     };
-  }, []);
+  }, [stopTracks]);
 
   return {
     isRecording,

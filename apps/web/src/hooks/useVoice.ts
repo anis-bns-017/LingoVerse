@@ -274,18 +274,18 @@ export const useLeaveVoiceRoom = () => {
       await voiceApi.leaveRoom(roomId);
     },
     onSuccess: (_, roomId) => {
+      // ✅ Invalidate both room and rooms queries
       queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
       queryClient.invalidateQueries({
         queryKey: ["voice-participants", roomId],
       });
-      toast.success("Left room");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to leave room");
     },
   });
 };
-
 export const useEndVoiceRoom = () => {
   const queryClient = useQueryClient();
   return useMutation({

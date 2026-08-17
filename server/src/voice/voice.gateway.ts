@@ -83,6 +83,105 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  
+
+  // ==================== BROADCAST METHODS ====================
+
+  broadcastTranscription(roomId: string, data: any) {
+    this.server.to(roomId).emit('transcription', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastClap(roomId: string, data: any) {
+    this.server.to(roomId).emit('clap-received', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastQueueUpdate(roomId: string, queue: any[]) {
+    this.server.to(roomId).emit('queue-updated', {
+      queue,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastParticipantJoined(roomId: string, participant: any) {
+    this.server.to(roomId).emit('participant-joined', {
+      participant,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastParticipantLeft(roomId: string, data: any) {
+    this.server.to(roomId).emit('participant-left', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastParticipantMuted(roomId: string, userId: string) {
+    this.server.to(roomId).emit('participant-muted', {
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastParticipantUnmuted(roomId: string, userId: string) {
+    this.server.to(roomId).emit('participant-unmuted', {
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastMuteAll(roomId: string) {
+    this.server.to(roomId).emit('mute-all', {
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastParticipantKicked(roomId: string, userId: string) {
+    this.server.to(roomId).emit('participant-kicked', {
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastHandRaised(roomId: string, userId: string) {
+    this.server.to(roomId).emit('hand-raised', {
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastHandLowered(roomId: string, userId: string) {
+    this.server.to(roomId).emit('hand-lowered', {
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastRecordingStarted(roomId: string) {
+    this.server.to(roomId).emit('recording-started', {
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastRecordingStopped(roomId: string) {
+    this.server.to(roomId).emit('recording-stopped', {
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  broadcastParticipantUpdate(roomId: string, data: any) {
+    this.server.to(roomId).emit('participant-updated', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   async handleDisconnect(client: Socket) {
     const userId = client.data.userId;
     if (!userId) return;
