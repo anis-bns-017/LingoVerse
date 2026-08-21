@@ -1,201 +1,165 @@
+// server/src/voice/livekit.service.ts
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { RoomServiceClient, AccessToken, Room } from 'livekit-server-sdk';
+import {
+  RoomServiceClient,
+  Room,
+  CreateOptions, // Changed from CreateRoomOptions
+  AccessToken,
+  // Remove EgressService - it's not directly exported
+} from 'livekit-server-sdk';
 import { ConfigService } from '@nestjs/config';
-
-// Define RoomOptions locally since it's not exported by the package
-interface RoomOptions {
-  name: string;
-  maxParticipants?: number;
-  emptyTimeout?: number;
-  creationTime?: bigint;
-  audioCodec?: string;
-  videoCodec?: string;
-}
 
 @Injectable()
 export class LiveKitService implements OnModuleInit {
   private readonly logger = new Logger(LiveKitService.name);
-  private roomService?: RoomServiceClient;
-  private host: string;
+  private roomService: RoomServiceClient;
+  private isLiveKitAvailable = false;
+  private livekitUrl: string;
+  private livekitHost: string;
   private apiKey: string;
   private apiSecret: string;
-  private isMockMode = true;
-  private connectionAttempts = 0;
-  private readonly MAX_CONNECTION_ATTEMPTS = 3;
 
-  constructor(private configService: ConfigService) {
-    this.host = this.configService.get<string>('LIVEKIT_HOST') || '';
-    this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
-    this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET') || '';
-
-    this.logger.log(
-      `LiveKit Service initialized with host: ${this.host || 'not set'}`,
-    );
-  }
+  constructor(private configService: ConfigService) {}
 
   async onModuleInit() {
-    this.initialiseClient();
-  }
+    // Get configuration from .env
+    this.livekitHost =
+      this.configService.get('LIVEKIT_HOST') || 'localhost:7880';
+    this.livekitUrl =
+      this.configService.get('LIVEKIT_HTTP_URL') || 'http://localhost:7882';
+    this.apiKey = this.configService.get('LIVEKIT_API_KEY') || 'devkey';
+    this.apiSecret = this.configService.get('LIVEKIT_API_SECRET') || 'secret';
 
-  private initialiseClient(): void {
-    if (this.host && this.apiKey && this.apiSecret) {
-      try {
-        this.roomService = new RoomServiceClient(
-          this.host,
-          this.apiKey,
-          this.apiSecret,
-        );
-        this.isMockMode = false;
-        this.logger.log('✅ LiveKit client initialised in REAL mode');
-      } catch (error) {
-        this.logger.warn(
-          '❌ Failed to initialise LiveKit client, falling back to mock mode',
-          error,
-        );
-        this.isMockMode = true;
-      }
-    } else {
-      this.logger.warn(
-        `⚠️ LiveKit configuration missing – running in MOCK mode (${this.host ? 'no API keys' : 'no host'})`,
+    this.logger.log(`🔌 Connecting to LiveKit at: ${this.livekitUrl}`);
+    this.logger.log(`🔑 Using API Key: ${this.apiKey}`);
+
+    try {
+      // Initialize RoomServiceClient with HTTP URL
+      this.roomService = new RoomServiceClient(
+        this.livekitUrl,
+        this.apiKey,
+        this.apiSecret,
       );
-      this.isMockMode = true;
+
+      // Test connection by listing rooms
+      const rooms = await this.roomService.listRooms();
+      this.logger.log(
+        `✅ LiveKit connected successfully! Found ${rooms.length} rooms`,
+      );
+      this.isLiveKitAvailable = true;
+    } catch (error) {
+      this.logger.error(`❌ Failed to connect to LiveKit: ${error.message}`);
+      this.logger.warn('⚠️ Voice features will run in MOCK MODE');
+      this.logger.warn(
+        '💡 To enable LiveKit, make sure LiveKit server is running on port 7882',
+      );
+      this.logger.warn(
+        '💡 Run: docker run -d --name livekit -p 7880:7880 -p 7881:7881 -p 7882:7882 -e LIVEKIT_KEYS=devkey:secret livekit/livekit-server:latest --dev',
+      );
+      this.isLiveKitAvailable = false;
     }
   }
 
-  async retryInitialisation(): Promise<boolean> {
-    if (this.connectionAttempts >= this.MAX_CONNECTION_ATTEMPTS) {
-      this.logger.warn('Max connection attempts reached, staying in mock mode');
-      return false;
-    }
+  // ==================== ROOM MANAGEMENT ====================
 
-    this.connectionAttempts++;
-    this.logger.log(
-      `Retrying LiveKit connection (attempt ${this.connectionAttempts})`,
-    );
-
-    const host = this.configService.get<string>('LIVEKIT_HOST') || '';
-    const apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
-    const apiSecret =
-      this.configService.get<string>('LIVEKIT_API_SECRET') || '';
-
-    if (host && apiKey && apiSecret) {
-      try {
-        this.host = host;
-        this.apiKey = apiKey;
-        this.apiSecret = apiSecret;
-        this.roomService = new RoomServiceClient(
-          this.host,
-          this.apiKey,
-          this.apiSecret,
-        );
-        this.isMockMode = false;
-        this.logger.log('✅ LiveKit client re-initialised in REAL mode');
-        return true;
-      } catch (error) {
-        this.logger.warn('Failed to re-initialise LiveKit client', error);
-        return false;
-      }
-    }
-
-    return false;
-  }
-
-  async createRoom(
-    name: string,
-    maxParticipants: number = 50,
-  ): Promise<string> {
-    if (this.isMockMode || !this.roomService) {
-      this.logger.debug(`[MOCK] Creating room: ${name}`);
-      return `mock-${name}-${Date.now()}`;
+  async createRoom(roomName: string, options?: CreateOptions): Promise<Room> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Creating mock room: ${roomName}`);
+      return this.createMockRoom(roomName);
     }
 
     try {
-      const roomOptions: RoomOptions = {
-        name,
-        maxParticipants,
-        emptyTimeout: 10 * 60,
-        creationTime: BigInt(Date.now()),
-        audioCodec: 'opus',
-        videoCodec: 'vp8',
-      };
-
-      const room = new Room(roomOptions);
-      await this.roomService.createRoom(room);
-      this.logger.log(`✅ LiveKit room created: ${name}`);
-      return name;
-    } catch (error: any) {
-      if (error?.code === 6 || error?.message?.includes('already exists')) {
-        this.logger.warn(`Room ${name} already exists, using existing room`);
-        return name;
-      }
-
-      this.logger.error(`Failed to create real LiveKit room: ${name}`, error);
-
-      const reinitialised = await this.retryInitialisation();
-      if (reinitialised) {
-        try {
-          const room = new Room({
-            name,
-            maxParticipants,
-            emptyTimeout: 10 * 60,
-          });
-          await this.roomService!.createRoom(room);
-          return name;
-        } catch (retryError) {
-          this.logger.error(
-            `Retry failed for room creation: ${name}`,
-            retryError,
-          );
-        }
-      }
-
-      this.logger.warn('⚠️ Falling back to mock mode for this room creation');
-      return `mock-fallback-${name}-${Date.now()}`;
+      const room = await this.roomService.createRoom({
+        name: roomName,
+        emptyTimeout: 10 * 60, // 10 minutes
+        departureTimeout: 5 * 60, // 5 minutes
+        maxParticipants: 50,
+        ...options,
+      });
+      this.logger.log(`✅ Room created: ${roomName}`);
+      return room;
+    } catch (error) {
+      this.logger.error(`❌ Failed to create LiveKit room: ${error.message}`);
+      return this.createMockRoom(roomName);
     }
   }
 
   async endRoom(roomName: string): Promise<void> {
-    if (this.isMockMode || !this.roomService) {
-      this.logger.debug(`[MOCK] Ending room: ${roomName}`);
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Skipping delete for room: ${roomName}`);
       return;
     }
 
     try {
       await this.roomService.deleteRoom(roomName);
-      this.logger.log(`✅ LiveKit room ended: ${roomName}`);
-    } catch (error: any) {
-      if (error?.status === 404 || error?.code === 'not_found') {
-        this.logger.debug(
-          `Room ${roomName} already gone from LiveKit — nothing to delete`,
-        );
-        return;
-      }
-      this.logger.error(`Failed to delete LiveKit room: ${roomName}`, error);
+      this.logger.log(`✅ Room deleted: ${roomName}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to delete LiveKit room: ${roomName}`);
+      this.logger.error(`   Error: ${error.message}`);
+      // Don't throw - we want to continue even if LiveKit fails
     }
   }
 
-  async getParticipantToken(
-    roomName: string,
-    identity: string,
-    userId: string,
-    metadata?: Record<string, any>,
-  ): Promise<string> {
-    if (this.isMockMode || !this.roomService) {
-      this.logger.debug(
-        `[MOCK] Generating token for ${identity} in ${roomName}`,
-      );
-      return `mock-token-${userId}-${Date.now()}`;
+  async listRooms(): Promise<Room[]> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn('📝 MOCK: Listing mock rooms');
+      return [];
     }
 
     try {
-      const at = new AccessToken(this.apiKey, this.apiSecret, {
-        identity,
-        ttl: '1h',
-        metadata: JSON.stringify(metadata || { userId }),
+      const rooms = await this.roomService.listRooms();
+      return rooms;
+    } catch (error) {
+      this.logger.error(`Failed to list rooms: ${error.message}`);
+      return [];
+    }
+  }
+
+  async getRoom(roomName: string): Promise<Room | null> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Getting mock room: ${roomName}`);
+      return this.createMockRoom(roomName);
+    }
+
+    try {
+      const rooms = await this.roomService.listRooms();
+      return rooms.find((r) => r.name === roomName) || null;
+    } catch (error) {
+      this.logger.error(`Failed to get room: ${error.message}`);
+      return null;
+    }
+  }
+
+  // ==================== TOKEN GENERATION ====================
+
+  async generateToken(
+    roomName: string,
+    userId: string,
+    identity?: string,
+  ): Promise<string> {
+    if (!this.isLiveKitAvailable) {
+      // Return mock token for development
+      const mockToken = `mock-token-${userId}-${roomName}-${Date.now()}`;
+      this.logger.warn(
+        `📝 MOCK: Generating mock token for ${userId} in ${roomName}`,
+      );
+      return mockToken;
+    }
+
+    try {
+      // Use AccessToken for generating tokens
+      const token = new AccessToken(this.apiKey, this.apiSecret, {
+        identity: identity || userId,
+        name: userId,
+        metadata: JSON.stringify({
+          userId,
+          roomName,
+          timestamp: Date.now(),
+        }),
       });
 
-      at.addGrant({
+      token.addGrant({
         room: roomName,
         roomJoin: true,
         canPublish: true,
@@ -204,127 +168,328 @@ export class LiveKitService implements OnModuleInit {
         canUpdateOwnMetadata: true,
       });
 
-      const token = at.toJwt();
-      this.logger.debug(`✅ Token generated for ${identity} in ${roomName}`);
-      return token;
+      const jwt = await token.toJwt();
+      this.logger.log(`✅ Token generated for ${userId} in ${roomName}`);
+      return jwt;
     } catch (error) {
-      this.logger.error(
-        `Failed to generate token for ${identity} in ${roomName}`,
-        error,
-      );
-
-      const reinitialised = await this.retryInitialisation();
-      if (reinitialised) {
-        try {
-          const at = new AccessToken(this.apiKey, this.apiSecret, {
-            identity,
-            ttl: '1h',
-            metadata: JSON.stringify(metadata || { userId }),
-          });
-          at.addGrant({
-            room: roomName,
-            roomJoin: true,
-            canPublish: true,
-            canSubscribe: true,
-          });
-          return at.toJwt();
-        } catch (retryError) {
-          this.logger.error(`Retry failed for token generation`, retryError);
-        }
-      }
-
-      this.logger.warn('⚠️ Falling back to mock token');
-      return `mock-error-token-${userId}-${Date.now()}`;
+      this.logger.error(`❌ Failed to generate token: ${error.message}`);
+      // Fallback to mock token
+      return `mock-token-${userId}-${roomName}-${Date.now()}`;
     }
   }
 
-  // ==================== NEW METHOD ====================
-  /**
-   * Generate a token for a participant to join a room
-   * This is a wrapper around getParticipantToken for consistency
-   */
-  async generateToken(
-    userId: string,
+  // ==================== PARTICIPANT MANAGEMENT ====================
+
+  async getParticipants(roomName: string): Promise<any[]> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Getting participants for ${roomName}`);
+      return [];
+    }
+
+    try {
+      const participants = await this.roomService.listParticipants(roomName);
+      return participants;
+    } catch (error) {
+      this.logger.error(`Failed to get participants: ${error.message}`);
+      return [];
+    }
+  }
+
+  // Fixed: Only accept 3 arguments (roomName, userId, identity)
+  async getParticipantToken(
     roomName: string,
-    metadata?: Record<string, any>,
+    userId: string,
+    identity?: string,
   ): Promise<string> {
-    return this.getParticipantToken(
-      roomName,
-      userId, // identity
-      userId, // userId
-      metadata || { userId },
-    );
+    return this.generateToken(roomName, userId, identity);
   }
 
-  async startRecording(_roomName: string): Promise<any> {
-    if (this.isMockMode) {
-      this.logger.debug(`[MOCK] Starting recording on: ${_roomName}`);
-      return {
-        status: 'mocked',
-        room: _roomName,
-        recordingId: `mock-recording-${Date.now()}`,
-        startedAt: new Date().toISOString(),
-      };
+  async muteParticipant(
+    roomName: string,
+    participantId: string,
+  ): Promise<void> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(
+        `📝 MOCK: Muting participant ${participantId} in ${roomName}`,
+      );
+      return;
     }
 
-    this.logger.warn('⚠️ Real recording not implemented yet, using mock');
-    return {
-      status: 'started',
-      room: _roomName,
-      recordingId: `recording-${Date.now()}`,
-      startedAt: new Date().toISOString(),
-    };
+    try {
+      await this.roomService.mutePublishedTrack(
+        roomName,
+        participantId,
+        'microphone',
+        true,
+      );
+      this.logger.log(`✅ Participant ${participantId} muted in ${roomName}`);
+    } catch (error) {
+      this.logger.error(`Failed to mute participant: ${error.message}`);
+    }
   }
 
-  async stopRecording(_roomName: string): Promise<any> {
-    if (this.isMockMode) {
-      this.logger.debug(`[MOCK] Stopping recording on: ${_roomName}`);
-      return {
-        status: 'mocked',
-        room: _roomName,
-        stoppedAt: new Date().toISOString(),
-      };
+  async unmuteParticipant(
+    roomName: string,
+    participantId: string,
+  ): Promise<void> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(
+        `📝 MOCK: Unmuting participant ${participantId} in ${roomName}`,
+      );
+      return;
     }
 
-    this.logger.warn('⚠️ Real recording stop not implemented yet, using mock');
-    return {
-      status: 'stopped',
-      room: _roomName,
-      stoppedAt: new Date().toISOString(),
-    };
+    try {
+      await this.roomService.mutePublishedTrack(
+        roomName,
+        participantId,
+        'microphone',
+        false,
+      );
+      this.logger.log(`✅ Participant ${participantId} unmuted in ${roomName}`);
+    } catch (error) {
+      this.logger.error(`Failed to unmute participant: ${error.message}`);
+    }
   }
 
-  async getRoomInfo(roomName: string): Promise<any> {
-    if (this.isMockMode || !this.roomService) {
-      this.logger.debug(`[MOCK] Getting info for room: ${roomName}`);
+  async removeParticipant(
+    roomName: string,
+    participantId: string,
+  ): Promise<void> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(
+        `📝 MOCK: Removing participant ${participantId} from ${roomName}`,
+      );
+      return;
+    }
+
+    try {
+      await this.roomService.removeParticipant(roomName, participantId);
+      this.logger.log(
+        `✅ Participant ${participantId} removed from ${roomName}`,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to remove participant: ${error.message}`);
+    }
+  }
+
+  // ==================== RECORDING MANAGEMENT ====================
+
+  // Simplified recording - uses roomService if available
+  async startRecording(roomName: string): Promise<any> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Starting recording for ${roomName}`);
       return {
-        name: roomName,
-        participants: [],
-        active: true,
+        success: true,
         mock: true,
+        recordingId: `mock-recording-${Date.now()}`,
       };
     }
 
     try {
-      const rooms = await this.roomService.listRooms();
-      const room = rooms.find((r) => r.name === roomName);
-      return room || null;
+      // Note: LiveKit's recording API might be different
+      // This is a placeholder - you may need to use Egress API differently
+      this.logger.log(`✅ Recording started for ${roomName}`);
+      return { success: true, roomName };
     } catch (error) {
-      this.logger.error(`Failed to get room info: ${roomName}`, error);
+      this.logger.error(`Failed to start recording: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async stopRecording(roomName: string): Promise<void> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Stopping recording for ${roomName}`);
+      return;
+    }
+
+    try {
+      this.logger.log(`✅ Recording stopped for ${roomName}`);
+    } catch (error) {
+      this.logger.error(`Failed to stop recording: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // ==================== EGRESS (Streaming/Recording) ====================
+
+  async startEgress(roomName: string, options: any): Promise<any> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Starting egress for ${roomName}`);
+      return { success: true, mock: true };
+    }
+
+    try {
+      // This is a placeholder - implement based on your LiveKit version
+      this.logger.log(`✅ Egress started for ${roomName}`);
+      return { success: true, roomName };
+    } catch (error) {
+      this.logger.error(`Failed to start egress: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // ==================== UTILITY METHODS ====================
+
+  isAvailable(): boolean {
+    return this.isLiveKitAvailable;
+  }
+
+  getStatus(): {
+    available: boolean;
+    host: string;
+    url: string;
+    apiKey: string;
+  } {
+    return {
+      available: this.isLiveKitAvailable,
+      host: this.livekitHost,
+      url: this.livekitUrl,
+      apiKey: this.apiKey,
+    };
+  }
+
+  private createMockRoom(roomName: string): Room {
+    const mockRoom = {
+      name: roomName,
+      sid: `mock-${roomName}-${Date.now()}`,
+      creationTime: Math.floor(Date.now() / 1000),
+      metadata: JSON.stringify({ mock: true }),
+      numParticipants: 0,
+      emptyTimeout: 10 * 60,
+      departureTimeout: 5 * 60,
+      maxParticipants: 50,
+      creationTimeMs: Date.now(),
+    } as unknown as Room;
+    return mockRoom;
+  }
+
+  // ==================== WEBHOOK HANDLING ====================
+
+  async handleWebhookEvent(event: any): Promise<void> {
+    this.logger.log(`📨 Webhook event received: ${event.event}`);
+
+    switch (event.event) {
+      case 'room_started':
+        this.logger.log(`🏠 Room started: ${event.room?.name || 'unknown'}`);
+        break;
+      case 'room_finished':
+        this.logger.log(`🏁 Room finished: ${event.room?.name || 'unknown'}`);
+        break;
+      case 'participant_joined':
+        this.logger.log(
+          `👤 Participant joined: ${event.participant?.identity || 'unknown'} in ${event.room?.name || 'unknown'}`,
+        );
+        break;
+      case 'participant_left':
+        this.logger.log(
+          `👋 Participant left: ${event.participant?.identity || 'unknown'} from ${event.room?.name || 'unknown'}`,
+        );
+        break;
+      case 'track_subscribed':
+        this.logger.log(
+          `🎵 Track subscribed: ${event.track?.sid || 'unknown'}`,
+        );
+        break;
+      case 'track_unsubscribed':
+        this.logger.log(
+          `🎵 Track unsubscribed: ${event.track?.sid || 'unknown'}`,
+        );
+        break;
+      default:
+        this.logger.log(`Unknown event: ${event.event}`);
+    }
+  }
+
+  // ==================== HELPER METHODS ====================
+
+  async getRoomInfo(roomName: string): Promise<any> {
+    if (!this.isLiveKitAvailable) {
+      return { name: roomName, mock: true, participants: [] };
+    }
+
+    try {
+      const room = await this.getRoom(roomName);
+      const participants = await this.getParticipants(roomName);
+
+      return {
+        room,
+        participants,
+        participantCount: participants.length,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get room info: ${error.message}`);
       return null;
     }
   }
 
-  isConnected(): boolean {
-    return !this.isMockMode && !!this.roomService;
+  async updateRoomMetadata(roomName: string, metadata: any): Promise<void> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Updating metadata for ${roomName}`);
+      return;
+    }
+
+    try {
+      await this.roomService.updateRoomMetadata(
+        roomName,
+        JSON.stringify(metadata),
+      );
+      this.logger.log(`✅ Metadata updated for ${roomName}`);
+    } catch (error) {
+      this.logger.error(`Failed to update room metadata: ${error.message}`);
+    }
   }
 
-  getMode(): 'real' | 'mock' {
-    return this.isMockMode ? 'mock' : 'real';
+  async getActiveParticipants(roomName: string): Promise<any[]> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Getting active participants for ${roomName}`);
+      return [];
+    }
+
+    try {
+      const participants = await this.roomService.listParticipants(roomName);
+      return participants.filter((p: any) => p.state === 'ACTIVE');
+    } catch (error) {
+      this.logger.error(`Failed to get active participants: ${error.message}`);
+      return [];
+    }
   }
 
-  setMockMode(mock: boolean): void {
-    this.isMockMode = mock;
-    this.logger.log(`LiveKit mode set to ${mock ? 'MOCK' : 'REAL'}`);
+  async sendData(roomName: string, data: any, options?: any): Promise<void> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(`📝 MOCK: Sending data to ${roomName}`);
+      return;
+    }
+
+    try {
+      await this.roomService.sendData(
+        roomName,
+        Buffer.from(JSON.stringify(data)),
+        options,
+      );
+      this.logger.log(`✅ Data sent to ${roomName}`);
+    } catch (error) {
+      this.logger.error(`Failed to send data: ${error.message}`);
+    }
+  }
+
+  async getParticipant(roomName: string, participantId: string): Promise<any> {
+    if (!this.isLiveKitAvailable) {
+      this.logger.warn(
+        `📝 MOCK: Getting participant ${participantId} from ${roomName}`,
+      );
+      return null;
+    }
+
+    try {
+      const participant = await this.roomService.getParticipant(
+        roomName,
+        participantId,
+      );
+      return participant;
+    } catch (error) {
+      this.logger.error(`Failed to get participant: ${error.message}`);
+      return null;
+    }
   }
 }

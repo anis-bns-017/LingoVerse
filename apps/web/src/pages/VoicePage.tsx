@@ -110,6 +110,7 @@ import {
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { VoiceRoomView } from "../components/voice/VoiceRoomView";
 import { useChatSocket } from "../hooks/useChat";
+import { useQueryClient } from "@tanstack/react-query";
 
 // ---- Theme Colors ----
 const COLORS = {
@@ -147,6 +148,40 @@ const TYPE_LABELS: Record<string, string> = {
   STAGE: "Stage",
   SCHEDULED: "Scheduled",
 };
+
+// ---- Helper Functions ----
+function initials(name: string) {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((n) => n[0]?.toUpperCase())
+      .join("") || "?"
+  );
+}
+
+function hueFromString(str: string) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++)
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  return Math.abs(hash) % 360;
+}
+
+function timeSince(date: string | Date) {
+  const now = new Date();
+  const past = new Date(date);
+  const diffMs = now.getTime() - past.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return `${diffHrs}h ago`;
+  const diffDays = Math.floor(diffHrs / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return past.toLocaleDateString();
+}
 
 // ---- Custom Confirmation Modal ----
 const ConfirmationModal: React.FC<{
@@ -332,40 +367,6 @@ const FloatingMiniRoom: React.FC<{
     </motion.div>
   );
 };
-
-// ---- Helper Functions ----
-function initials(name: string) {
-  return (
-    name
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((n) => n[0]?.toUpperCase())
-      .join("") || "?"
-  );
-}
-
-function hueFromString(str: string) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++)
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  return Math.abs(hash) % 360;
-}
-
-function timeSince(date: string | Date) {
-  const now = new Date();
-  const past = new Date(date);
-  const diffMs = now.getTime() - past.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHrs = Math.floor(diffMins / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return past.toLocaleDateString();
-}
 
 // ---- TOPICS Array ----
 const TOPICS = [
@@ -1022,7 +1023,6 @@ const CreateRoomModal: React.FC<{
   );
 };
 
-// ---- Room Card Component ----
 const RoomCard: React.FC<{
   room: VoiceRoom;
   isCreator: boolean;
@@ -1037,7 +1037,7 @@ const RoomCard: React.FC<{
   participantCount: number;
   previewParticipants: any[];
   hasMoreParticipants: boolean;
-  currentUserInRoom: boolean;
+  isUserInRoom: boolean;
 }> = ({
   room,
   isCreator,
@@ -1052,7 +1052,7 @@ const RoomCard: React.FC<{
   participantCount,
   previewParticipants,
   hasMoreParticipants,
-  currentUserInRoom,
+  isUserInRoom,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const TypeIcon = typeConfig.icon;
@@ -1081,6 +1081,8 @@ const RoomCard: React.FC<{
               >
                 {room.name}
               </h3>
+
+              {/* HOST BADGE */}
               {isCreator && (
                 <span
                   className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1"
@@ -1089,9 +1091,24 @@ const RoomCard: React.FC<{
                     color: COLORS.spotlight,
                   }}
                 >
-                  <Crown className="w-3 h-3" /> Host
+                  <Crown className="w-3 h-3" /> HOST
                 </span>
               )}
+
+              {/* INSIDE BADGE - Shows when user is in the room */}
+              {isUserInRoom && !isCreator && (
+                <span
+                  className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse"
+                  style={{
+                    background: COLORS.liveDim,
+                    color: COLORS.live,
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  INSIDE
+                </span>
+              )}
+
               {room.isRecording && (
                 <span
                   className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse"
@@ -1102,15 +1119,6 @@ const RoomCard: React.FC<{
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
                   Recording
-                </span>
-              )}
-              {currentUserInRoom && (
-                <span
-                  className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full flex items-center gap-1"
-                  style={{ background: COLORS.liveDim, color: COLORS.live }}
-                >
-                  <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                  Inside
                 </span>
               )}
             </div>
@@ -1201,84 +1209,50 @@ const RoomCard: React.FC<{
           )}
         </div>
 
-        {/* ✅ FIXED: ACTIONS - Show BOTH buttons for creator when they leave */}
+        {/* ✅ FIXED: Actions - Always show "Join Room" button */}
         <div
           className="flex items-center gap-2 mt-4 pt-3 border-t"
           style={{ borderColor: COLORS.border }}
         >
-          {/* ✅ Case 1: Creator - ALWAYS show "End Room" */}
-          {/* ✅ Plus show "Join Room" if creator is NOT in the room */}
+          {/* "Join Room" button - Always visible for everyone */}
+          <button
+            onClick={onJoin}
+            disabled={isFull || isJoining}
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background: isFull ? COLORS.textMuted : accent,
+              color: isFull ? COLORS.void : COLORS.void,
+            }}
+          >
+            {isJoining ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : room.type === "PRIVATE" ? (
+              <Lock className="w-4 h-4" />
+            ) : (
+              <LogIn className="w-4 h-4" />
+            )}
+            {isJoining
+              ? "Joining..."
+              : isFull
+                ? "Full"
+                : isUserInRoom
+                  ? "Rejoin Room"
+                  : "Join Room"}
+          </button>
+
+          {/* "End Room" button - Only show for the creator/host */}
           {isCreator && (
-            <>
-              {/* Show "Join Room" for creator if they're NOT in the room */}
-              {!currentUserInRoom && (
-                <button
-                  onClick={onJoin}
-                  disabled={isFull || isJoining}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: accent,
-                    color: COLORS.void,
-                  }}
-                >
-                  {isJoining ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : room.type === "PRIVATE" ? (
-                    <Lock className="w-4 h-4" />
-                  ) : (
-                    <LogIn className="w-4 h-4" />
-                  )}
-                  {isJoining ? "Joining..." : "Join Room"}
-                </button>
-              )}
-
-              {/* Always show "End Room" for creator */}
-              <button
-                onClick={onEnd}
-                className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors hover:bg-white/5 ${
-                  !currentUserInRoom ? "flex-1" : "flex-1"
-                }`}
-                style={{ borderColor: COLORS.border, color: COLORS.textMuted }}
-              >
-                <Square className="w-3.5 h-3.5" />
-                End Room
-              </button>
-            </>
-          )}
-
-          {/* ✅ Case 2: Non-creator NOT in room - show "Join Room" */}
-          {!isCreator && !currentUserInRoom && (
             <button
-              onClick={onJoin}
-              disabled={isFull || isJoining}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{
-                background: isFull ? COLORS.textMuted : accent,
-                color: isFull ? COLORS.void : COLORS.void,
-              }}
+              onClick={onEnd}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors hover:bg-white/5"
+              style={{ borderColor: COLORS.border, color: COLORS.textMuted }}
             >
-              {isJoining ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : room.type === "PRIVATE" ? (
-                <Lock className="w-4 h-4" />
-              ) : (
-                <LogIn className="w-4 h-4" />
-              )}
-              {isJoining ? "Joining..." : isFull ? "Full" : "Join Room"}
+              <Square className="w-3.5 h-3.5" />
+              End Room
             </button>
           )}
 
-          {/* ✅ Case 3: Non-creator inside room - show "Inside" badge */}
-          {currentUserInRoom && !isCreator && (
-            <div
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-full text-sm font-medium"
-              style={{ color: COLORS.live }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              You're in this room
-            </div>
-          )}
-
+          {/* Share button - Always visible */}
           <button
             onClick={onCopyLink}
             className="p-2 rounded-full transition-colors hover:bg-white/5"
@@ -1297,6 +1271,7 @@ export const VoicePage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { roomId: urlRoomId } = useParams<{ roomId?: string }>();
+  const queryClient = useQueryClient();
   const { data: rooms, isLoading, refetch } = useVoiceRooms();
   const createRoom = useCreateVoiceRoom();
   const endRoom = useEndVoiceRoom();
@@ -1320,10 +1295,6 @@ export const VoicePage = () => {
   const [showJoinPassword, setShowJoinPassword] = useState(false);
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState<
-    { id: string; message: string; type: string }[]
-  >([]);
 
   // State for the current room ID
   const [activeRoomId, setActiveRoomId] = useState<string | null>(
@@ -1334,9 +1305,8 @@ export const VoicePage = () => {
   const [miniRoom, setMiniRoom] = useState<VoiceRoom | null>(null);
   const [showMiniRoom, setShowMiniRoom] = useState(false);
 
-  // The API/cache can briefly contain stale participant data after leaving.
-  // Keep the last-left room locally so the creator immediately gets Join + End.
-  const [leftRoomId, setLeftRoomId] = useState<string | null>(null);
+  // ✅ TRACK ROOMS THE USER HAS LEFT
+  const [leftRoomIds, setLeftRoomIds] = useState<Set<string>>(new Set());
 
   // Confirmation Modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -1372,6 +1342,25 @@ export const VoicePage = () => {
     return () => clearInterval(interval);
   }, [refetch]);
 
+  // ✅ Handle browser back button - leave the room when navigating away
+  useEffect(() => {
+    const handlePopState = () => {
+      // If we have an active room and we're navigating back
+      if (activeRoomId && !showMiniRoom) {
+        console.log("🔙 Back button pressed, leaving room:", activeRoomId);
+        // Mark the room as left
+        setLeftRoomIds((prev) => new Set(prev).add(activeRoomId));
+        // Clear active room
+        setActiveRoomId(null);
+        // Navigate to voice page
+        navigate("/voice");
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [activeRoomId, showMiniRoom, navigate]);
+
   const activeRooms = useMemo(() => {
     if (!rooms) return [];
     return rooms.filter((room) => room.status !== "ENDED");
@@ -1397,6 +1386,32 @@ export const VoicePage = () => {
     }
     return result;
   }, [activeRooms, searchQuery, filterType]);
+
+  // ✅ FIXED: isUserInRoom function with leftRoomIds
+  const isUserInRoom = useCallback(
+    (room: VoiceRoom) => {
+      if (!user?.id) return false;
+
+      // ✅ If we left this room, consider the user as NOT in the room
+      if (leftRoomIds.has(room.id)) return false;
+
+      // ✅ Check if user is in participants list
+      const isInRoom =
+        room.participants?.some((p: any) => p.userId === user.id) || false;
+
+      // ✅ If the user is not in the room, remove from leftRoomIds
+      if (!isInRoom && leftRoomIds.has(room.id)) {
+        setLeftRoomIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(room.id);
+          return newSet;
+        });
+      }
+
+      return isInRoom;
+    },
+    [user?.id, leftRoomIds],
+  );
 
   // ✅ FIXED: handleCreate - creates room and navigates properly
   const handleCreate = async (data: any) => {
@@ -1424,16 +1439,14 @@ export const VoicePage = () => {
       toast.success("🎉 Room created! Invite others to join.");
       setShowCreate(false);
       setIsCreateMinimized(false);
-      setNotifications((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          message: `Room "${newRoom.name}" created successfully!`,
-          type: "success",
-        },
-      ]);
 
-      setLeftRoomId(null);
+      // ✅ Remove from left rooms if it was there
+      setLeftRoomIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(newRoom.id);
+        return newSet;
+      });
+
       setActiveRoomId(newRoom.id);
       navigate(`/voice/${newRoom.id}`);
     } catch (error: any) {
@@ -1444,13 +1457,16 @@ export const VoicePage = () => {
 
   // Handle joining/rejoining a room
   const handleJoinRoom = async (room: VoiceRoom) => {
-    const isAlreadyInRoom = room.participants?.some(
-      (p: any) => p.userId === user?.id,
-    );
+    const isAlreadyInRoom = isUserInRoom(room);
 
     // If user is already in the room, just navigate directly
     if (isAlreadyInRoom) {
-      setLeftRoomId(null);
+      // ✅ Remove from left rooms if it was there
+      setLeftRoomIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(room.id);
+        return newSet;
+      });
       setActiveRoomId(room.id);
       navigate(`/voice/${room.id}`);
       return;
@@ -1478,7 +1494,14 @@ export const VoicePage = () => {
     try {
       setJoiningRoomId(room.id);
       await joinRoom.mutateAsync(room.id);
-      setLeftRoomId(null);
+
+      // ✅ Remove from left rooms
+      setLeftRoomIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(room.id);
+        return newSet;
+      });
+
       await refetch();
       setActiveRoomId(room.id);
       navigate(`/voice/${room.id}`);
@@ -1490,7 +1513,11 @@ export const VoicePage = () => {
         errorMessage.includes("already in the room")
       ) {
         await refetch();
-        setLeftRoomId(null);
+        setLeftRoomIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(room.id);
+          return newSet;
+        });
         setActiveRoomId(room.id);
         navigate(`/voice/${room.id}`);
         return;
@@ -1510,7 +1537,13 @@ export const VoicePage = () => {
     try {
       setJoiningRoomId(joinTarget.id);
       await joinRoom.mutateAsync(joinTarget.id);
-      setLeftRoomId(null);
+
+      setLeftRoomIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(joinTarget.id);
+        return newSet;
+      });
+
       await refetch();
       setActiveRoomId(joinTarget.id);
       navigate(`/voice/${joinTarget.id}`, {
@@ -1538,17 +1571,11 @@ export const VoicePage = () => {
         try {
           await endRoom.mutateAsync(roomId);
           toast.success("Room ended");
-
           await refetch();
 
-          setNotifications((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              message: "Room has been ended",
-              type: "info",
-            },
-          ]);
+          // ✅ Add to left rooms
+          setLeftRoomIds((prev) => new Set(prev).add(roomId));
+
           if (miniRoom?.id === roomId) {
             setShowMiniRoom(false);
             setMiniRoom(null);
@@ -1556,9 +1583,6 @@ export const VoicePage = () => {
           if (activeRoomId === roomId) {
             setActiveRoomId(null);
             navigate("/voice");
-          }
-          if (leftRoomId === roomId) {
-            setLeftRoomId(null);
           }
         } catch (error: any) {
           toast.error(error.response?.data?.message || "Failed to end room");
@@ -1573,9 +1597,6 @@ export const VoicePage = () => {
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  // Called after VoiceRoomView has already performed the actual leave API call.
-  // IMPORTANT: do not call leaveRoom.mutateAsync() again here; VoiceRoomView
-  // already does that. Calling it twice can leave stale participant state.
   const handleRoomLeft = async () => {
     const roomId = activeRoomId;
 
@@ -1585,11 +1606,13 @@ export const VoicePage = () => {
     }
 
     try {
-      // Immediately override stale participant data in the room list.
-      setLeftRoomId(roomId);
+      // ✅ Add to left rooms set
+      setLeftRoomIds((prev) => new Set(prev).add(roomId));
 
-      // Refresh after the child component's leave request has completed.
+      // ✅ Force a refetch of the rooms list
       await refetch();
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
+      queryClient.refetchQueries({ queryKey: ["voice-rooms"] });
 
       setShowMiniRoom(false);
       setMiniRoom(null);
@@ -1597,7 +1620,6 @@ export const VoicePage = () => {
       navigate("/voice");
     } catch (error) {
       console.error("Error refreshing after leaving room:", error);
-      // Even if refresh fails, the user has already left the room.
       setShowMiniRoom(false);
       setMiniRoom(null);
       setActiveRoomId(null);
@@ -1605,8 +1627,7 @@ export const VoicePage = () => {
     }
   };
 
-  // Close the minimized room. Unlike handleRoomLeft, this button lives
-  // outside VoiceRoomView, so it must perform the leave API call itself.
+  // Close the minimized room
   const handleCloseMiniRoom = async () => {
     if (!miniRoom?.id) return;
 
@@ -1615,7 +1636,8 @@ export const VoicePage = () => {
     try {
       await leaveRoom.mutateAsync(roomId);
 
-      setLeftRoomId(roomId);
+      // ✅ Add to left rooms
+      setLeftRoomIds((prev) => new Set(prev).add(roomId));
       await refetch();
 
       setShowMiniRoom(false);
@@ -1630,8 +1652,6 @@ export const VoicePage = () => {
     }
   };
 
-  // IMPORTANT: keep activeRoomId unchanged while minimized.
-  // This keeps VoiceRoomView mounted, so LiveKit and the socket stay connected.
   const handleMinimizeRoom = (roomData: any) => {
     setMiniRoom(roomData);
     setShowMiniRoom(true);
@@ -1639,6 +1659,13 @@ export const VoicePage = () => {
 
   const handleMaximizeRoom = () => {
     if (!miniRoom) return;
+
+    // ✅ Remove from left rooms when maximizing
+    setLeftRoomIds((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(miniRoom.id);
+      return newSet;
+    });
 
     setShowMiniRoom(false);
     setActiveRoomId(miniRoom.id);
@@ -1665,16 +1692,6 @@ export const VoicePage = () => {
       STAGE: { label: "Stage", icon: Radio },
       SCHEDULED: { label: "Scheduled", icon: Calendar },
     };
-
-  const isUserInRoom = (room: VoiceRoom) => {
-    if (!user?.id) return false;
-
-    // If we just left this room, don't trust a temporarily stale
-    // participants array from the query cache.
-    if (leftRoomId === room.id) return false;
-
-    return room.participants?.some((p: any) => p.userId === user.id) || false;
-  };
 
   // While minimized, the room component stays mounted but the room list
   // becomes visible underneath it.
@@ -1813,7 +1830,6 @@ export const VoicePage = () => {
                   background: COLORS.surface,
                   borderColor: COLORS.border,
                   color: COLORS.textPrimary,
-                  placeholderColor: COLORS.textMuted,
                 }}
               />
             </div>
@@ -1904,7 +1920,6 @@ export const VoicePage = () => {
             ))}
           </div>
         ) : (
-          // Show the room list
           <>
             {filteredRooms.length > 0 ? (
               <div
@@ -1952,7 +1967,7 @@ export const VoicePage = () => {
                       participantCount={participantCount}
                       previewParticipants={previewParticipants}
                       hasMoreParticipants={hasMoreParticipants}
-                      currentUserInRoom={currentUserInRoom}
+                      isUserInRoom={currentUserInRoom}
                     />
                   );
                 })}
@@ -2066,8 +2081,7 @@ export const VoicePage = () => {
         )}
       </div>
 
-      {/* Persistent VoiceRoomView
-          It stays mounted while minimized so LiveKit + WebSocket remain connected. */}
+      {/* Persistent VoiceRoomView */}
       {activeRoomId && (
         <div
           className={
@@ -2122,7 +2136,7 @@ export const VoicePage = () => {
         )}
       </AnimatePresence>
 
-      {/* Join Password Modal - Simplified */}
+      {/* Join Password Modal */}
       <AnimatePresence>
         {joinTarget && (
           <motion.div

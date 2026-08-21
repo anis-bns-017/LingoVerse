@@ -12,6 +12,22 @@ import {
   Participant,
 } from "livekit-client";
 
+// ---------- Environment Variables ----------
+// Use import.meta.env for Vite, fallback to process.env for Next.js
+const getEnvVar = (key: string, fallback: string): string => {
+  // Check if we're in a Vite environment
+  if (typeof import.meta !== "undefined" && import.meta.env) {
+    const viteVar = import.meta.env[key];
+    if (viteVar) return viteVar;
+  }
+  // Check if we're in a Next.js environment
+  if (typeof process !== "undefined" && process.env) {
+    const nextVar = process.env[key];
+    if (nextVar) return nextVar;
+  }
+  return fallback;
+};
+
 // ---------- Types ----------
 export interface VoiceRoom {
   id: string;
@@ -33,6 +49,7 @@ export interface VoiceRoom {
   stages: Stage[];
   createdAt: string;
   updatedAt: string;
+  liveKitRoomId?: string;
 }
 
 export interface VoiceParticipant {
@@ -169,6 +186,11 @@ export const useVoiceRooms = (filters?: { type?: string; status?: string }) => {
       const response = await voiceApi.getRooms(filters);
       return response.data;
     },
+    staleTime: 0,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+    refetchInterval: 15000,
   });
 };
 
@@ -180,6 +202,10 @@ export const useVoiceRoom = (roomId: string) => {
       return response.data;
     },
     enabled: !!roomId,
+    staleTime: 0,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 };
 
@@ -191,6 +217,8 @@ export const useRoomParticipants = (roomId: string) => {
       return response.data;
     },
     enabled: !!roomId,
+    staleTime: 0,
+    refetchInterval: 5000,
   });
 };
 
@@ -202,6 +230,7 @@ export const useRoomMessages = (roomId: string, limit: number = 50) => {
       return response.data;
     },
     enabled: !!roomId,
+    staleTime: 0,
   });
 };
 
@@ -237,9 +266,9 @@ export const useCreateVoiceRoom = () => {
       const response = await voiceApi.createRoom(data);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
-      toast.success("Room created!");
+      toast.success(`🎉 Room "${data.name}" created!`);
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to create room");
@@ -259,7 +288,8 @@ export const useJoinVoiceRoom = () => {
       queryClient.invalidateQueries({
         queryKey: ["voice-participants", roomId],
       });
-      toast.success("Joined room!");
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
+      toast.success("🎧 Joined room!");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to join room");
@@ -274,18 +304,22 @@ export const useLeaveVoiceRoom = () => {
       await voiceApi.leaveRoom(roomId);
     },
     onSuccess: (_, roomId) => {
-      // ✅ Invalidate both room and rooms queries
-      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
       queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
       queryClient.invalidateQueries({
         queryKey: ["voice-participants", roomId],
       });
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms", "active"] });
+      queryClient.invalidateQueries({ queryKey: ["voice-rooms", "all"] });
+      queryClient.refetchQueries({ queryKey: ["voice-rooms"] });
+      toast.success("👋 Left room");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to leave room");
     },
   });
 };
+
 export const useEndVoiceRoom = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -295,7 +329,11 @@ export const useEndVoiceRoom = () => {
     onSuccess: (_, roomId) => {
       queryClient.invalidateQueries({ queryKey: ["voice-rooms"] });
       queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
-      toast.success("Room ended");
+      queryClient.invalidateQueries({
+        queryKey: ["voice-participants", roomId],
+      });
+      queryClient.refetchQueries({ queryKey: ["voice-rooms"] });
+      toast.success("📢 Room ended");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to end room");
@@ -349,7 +387,7 @@ export const useAddToStage = () => {
       queryClient.invalidateQueries({
         queryKey: ["voice-participants", roomId],
       });
-      toast.success("Added to stage");
+      toast.success("🎤 Added to stage");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to add to stage");
@@ -394,7 +432,7 @@ export const useStartRecording = () => {
     },
     onSuccess: (_, roomId) => {
       queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
-      toast.success("Recording started");
+      toast.success("🎙️ Recording started");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to start recording");
@@ -412,7 +450,7 @@ export const useStopRecording = () => {
     onSuccess: (_, roomId) => {
       queryClient.invalidateQueries({ queryKey: ["voice-room", roomId] });
       queryClient.invalidateQueries({ queryKey: ["voice-recordings", roomId] });
-      toast.success("Recording stopped");
+      toast.success("⏹️ Recording stopped");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to stop recording");
@@ -468,9 +506,9 @@ export const useDeleteVoiceMessage = () => {
     }) => {
       await voiceApi.deleteRoomMessage(roomId, messageId);
     },
-    onSuccess: (_, { roomId, messageId }) => {
+    onSuccess: (_, { roomId }) => {
       queryClient.invalidateQueries({ queryKey: ["voice-messages", roomId] });
-      toast.success("Message deleted");
+      toast.success("🗑️ Message deleted");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to delete message");
@@ -496,7 +534,7 @@ export const usePromoteHost = () => {
       queryClient.invalidateQueries({
         queryKey: ["voice-participants", roomId],
       });
-      toast.success("Host transferred successfully!");
+      toast.success("👑 Host transferred successfully!");
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || "Failed to transfer host");
@@ -513,33 +551,44 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [hostId, setHostId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const reconnectAttemptsRef = useRef(0);
+
+  // Get socket URL with environment variable support
+  const socketUrl = getEnvVar("VITE_SOCKET_URL", "http://localhost:3000/voice");
 
   useEffect(() => {
     if (!roomId || !userId) return;
 
-    const s = io("http://localhost:3000/voice", {
+    const s = io(socketUrl, {
       withCredentials: true,
       transports: ["websocket"],
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     s.on("connect", () => {
       console.log("✅ Connected to voice socket");
       setIsConnected(true);
+      reconnectAttemptsRef.current = 0;
       s.emit("voice:join", { roomId });
     });
 
-    s.on("disconnect", () => {
-      console.log("❌ Disconnected from voice socket");
+    s.on("disconnect", (reason) => {
+      console.log("❌ Disconnected from voice socket:", reason);
       setIsConnected(false);
     });
 
     s.on("connect_error", (err) => {
       console.error("Socket connection error:", err);
-      toast.error("Failed to connect to voice server");
+      reconnectAttemptsRef.current += 1;
+      if (reconnectAttemptsRef.current >= 5) {
+        toast.error(
+          "Failed to connect to voice server after multiple attempts",
+        );
+      }
     });
 
     // ---------- Participant Events ----------
@@ -567,7 +616,7 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
 
     s.on("voice:host-changed", (data: { newHostId: string }) => {
       setHostId(data.newHostId);
-      toast.info("Host has changed");
+      toast.info("👑 Host has changed");
     });
 
     s.on("voice:kicked", (data: { roomId: string; reason: string }) => {
@@ -637,11 +686,11 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
 
     // ---------- Mute Events ----------
     s.on("voice:muted", (data: { userId: string; mutedBy: string }) => {
-      toast.info(`User ${data.userId} was muted`);
+      toast.info(`🔇 User ${data.userId} was muted`);
     });
 
     s.on("voice:unmuted", (data: { userId: string; unmutedBy: string }) => {
-      toast.info(`User ${data.userId} was unmuted`);
+      toast.info(`🔊 User ${data.userId} was unmuted`);
     });
 
     s.on("voice:self-muted", (data: { userId: string; muted: boolean }) => {
@@ -670,8 +719,9 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
         s.emit("voice:leave", { roomId });
         s.disconnect();
       }
+      s.offAny();
     };
-  }, [roomId, userId, queryClient]);
+  }, [roomId, userId, queryClient, socketUrl]);
 
   // ---------- Socket Actions ----------
   const sendChatMessage = useCallback(
@@ -837,22 +887,59 @@ export const useVoiceSocket = (roomId: string, userId: string) => {
 
 // ---------- LiveKit Room Hook ----------
 
+interface LiveKitParticipant {
+  identity: string;
+  name: string;
+  avatarUrl?: string;
+}
+
 export const useLiveKitRoom = (
   roomName: string,
   token: string | null,
-  options?: { onTrackSubscribed?: (track: any) => void },
+  options?: {
+    onAudioLevel?: (level: number) => void;
+    onTrackSubscribed?: (track: any) => void;
+  },
 ) => {
   const [room, setRoom] = useState<Room | null>(null);
   const [localTrack, setLocalTrack] = useState<LocalAudioTrack | null>(null);
-  const [remoteTracks, setRemoteTracks] = useState<RemoteAudioTrack[]>([]);
+  const [remoteTracks, setRemoteTracks] = useState<Record<string, boolean>>({});
+  const [participants, setParticipants] = useState<LiveKitParticipant[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [isMockMode, setIsMockMode] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggleMute = useCallback(() => {
+    if (localTrack) {
+      const isMuted = localTrack.isMuted;
+      localTrack.mute(!isMuted);
+      return !isMuted;
+    }
+    return false;
+  }, [localTrack]);
+
+  // Get LiveKit URL with environment variable support
+  const liveKitUrl = getEnvVar("VITE_LIVEKIT_URL", "ws://localhost:7880");
 
   useEffect(() => {
     if (!token || !roomName) return;
 
+    // Check if this is a mock token
     if (token.startsWith("mock-")) {
       console.log("🔇 Mock mode – skipping LiveKit connection");
       setIsConnected(true);
+      setIsMockMode(true);
+      setParticipants([
+        { identity: "mock-user-1", name: "Alice" },
+        { identity: "mock-user-2", name: "Bob" },
+        { identity: "mock-user-3", name: "Charlie" },
+      ]);
+      setRemoteTracks({
+        "mock-user-1": true,
+        "mock-user-2": false,
+        "mock-user-3": true,
+      });
       return;
     }
 
@@ -864,30 +951,76 @@ export const useLiveKitRoom = (
 
     const connect = async () => {
       try {
-        await livekitRoom.connect("ws://localhost:7880", token);
+        await livekitRoom.connect(liveKitUrl, token);
         setIsConnected(true);
+        setError(null);
         const local =
           await livekitRoom.localParticipant.setMicrophoneEnabled(true);
         setLocalTrack(local);
 
         livekitRoom.on(RoomEvent.TrackSubscribed, (track: any) => {
           if (track.kind === "audio") {
-            setRemoteTracks((prev) => [...prev, track]);
+            setRemoteTracks((prev) => ({ ...prev, [track.sid]: true }));
+          }
+          if (options?.onTrackSubscribed) {
+            options.onTrackSubscribed(track);
           }
         });
 
         livekitRoom.on(RoomEvent.TrackUnsubscribed, (track: any) => {
           if (track.kind === "audio") {
-            setRemoteTracks((prev) => prev.filter((t) => t !== track));
+            setRemoteTracks((prev) => {
+              const newState = { ...prev };
+              delete newState[track.sid];
+              return newState;
+            });
           }
         });
 
-        if (options?.onTrackSubscribed) {
-          livekitRoom.on(RoomEvent.TrackSubscribed, options.onTrackSubscribed);
+        livekitRoom.on(
+          RoomEvent.ParticipantConnected,
+          (participant: Participant) => {
+            setParticipants((prev) => [
+              ...prev,
+              {
+                identity: participant.identity,
+                name: participant.name || participant.identity,
+              },
+            ]);
+          },
+        );
+
+        livekitRoom.on(
+          RoomEvent.ParticipantDisconnected,
+          (participant: Participant) => {
+            setParticipants((prev) =>
+              prev.filter((p) => p.identity !== participant.identity),
+            );
+          },
+        );
+
+        // Get initial participants
+        const initialParticipants = Array.from(
+          livekitRoom.participants.values(),
+        ).map((p) => ({
+          identity: p.identity,
+          name: p.name || p.identity,
+        }));
+        setParticipants(initialParticipants);
+
+        // Audio level monitoring
+        if (options?.onAudioLevel) {
+          livekitRoom.on(RoomEvent.AudioLevel, (levels: any) => {
+            const level =
+              levels.find((l: any) => l.participant.isLocal)?.level || 0;
+            setAudioLevel(level);
+            options.onAudioLevel?.(level);
+          });
         }
       } catch (error) {
         console.error("LiveKit connection error:", error);
         setIsConnected(false);
+        setError(error instanceof Error ? error.message : "Connection failed");
       }
     };
 
@@ -898,9 +1031,19 @@ export const useLiveKitRoom = (
         livekitRoom.disconnect();
       }
     };
-  }, [token, roomName]);
+  }, [token, roomName, options, liveKitUrl]);
 
-  return { room, localTrack, remoteTracks, isConnected };
+  return {
+    room,
+    localTrack,
+    remoteTracks,
+    participants,
+    isConnected,
+    isMockMode,
+    audioLevel,
+    toggleMute,
+    error,
+  };
 };
 
 // ---------- Recording Hook ----------

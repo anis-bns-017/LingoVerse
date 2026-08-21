@@ -203,7 +203,7 @@ export class SendVoiceMessageDto {
   fileUrl?: string;
 
   @IsOptional()
-  @IsUUID(4)
+  @IsString()
   replyToId?: string;
 }
 
@@ -215,7 +215,7 @@ export class VoiceMessageHistoryDto {
   limit?: number;
 
   @IsOptional()
-  @IsUUID(4)
+  @IsString()
   before?: string;
 }
 

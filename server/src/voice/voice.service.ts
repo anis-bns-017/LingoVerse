@@ -310,7 +310,6 @@ export class VoiceService {
         liveKitRoomId,
         userId,
         userId,
-        { userId, roomId },
       );
     }
 
@@ -966,6 +965,7 @@ export class VoiceService {
     fileUrl?: string,
     replyToId?: string,
   ) {
+    // 1. Check room
     const room = await this.prisma.voiceRoom.findUnique({
       where: { id: roomId },
     });
@@ -974,6 +974,7 @@ export class VoiceService {
       throw new NotFoundException('Room not found');
     }
 
+    // 2. Check sender is currently a participant
     const participant = await this.prisma.voiceParticipant.findUnique({
       where: {
         roomId_userId: {
@@ -983,20 +984,54 @@ export class VoiceService {
       },
     });
 
-    if (!participant) {
+    if (!participant || participant.leftAt !== null) {
       throw new ForbiddenException('You must be in the room to send messages');
     }
 
+    // 3. Validate reply message
+    let validReplyToId: string | undefined = undefined;
+
+    if (replyToId) {
+      const replyMessage = await this.prisma.voiceRoomMessage.findUnique({
+        where: {
+          id: replyToId,
+        },
+        select: {
+          id: true,
+          roomId: true,
+        },
+      });
+
+      // Reply message does not exist
+      if (!replyMessage) {
+        throw new BadRequestException(
+          'The message you are trying to reply to does not exist',
+        );
+      }
+
+      // Prevent replying to a message from another room
+      if (replyMessage.roomId !== roomId) {
+        throw new BadRequestException(
+          'You cannot reply to a message from another room',
+        );
+      }
+
+      validReplyToId = replyMessage.id;
+    }
+
+    // 4. Create message
     return this.prisma.voiceRoomMessage.create({
       data: {
         roomId,
         senderId: userId,
-        content,
+        content: content.trim(),
         type,
-        mediaUrl,
-        fileUrl,
-        replyToId,
+        mediaUrl: mediaUrl || undefined,
+        fileUrl: fileUrl || undefined,
+        replyToId: validReplyToId,
       },
+
+      // 5. Return sender + replied message
       include: {
         sender: {
           select: {
@@ -1005,6 +1040,7 @@ export class VoiceService {
             avatarUrl: true,
           },
         },
+
         replyTo: {
           include: {
             sender: {

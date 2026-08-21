@@ -83,8 +83,6 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  
-
   // ==================== BROADCAST METHODS ====================
 
   broadcastTranscription(roomId: string, data: any) {
@@ -487,14 +485,14 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      // ✅ Verify user is in the room
+      // Verify user is in the room
       const participants = this.roomParticipants.get(data.roomId);
       if (!participants || !participants.has(userId)) {
         client.emit('voice:error', { message: 'You are not in this room' });
         return;
       }
 
-      // ✅ Save message to database using VoiceRoomMessage
+      // Save message to database
       const message = await this.prisma.voiceRoomMessage.create({
         data: {
           roomId: data.roomId,
@@ -512,7 +510,6 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
       });
 
-      // ✅ Get host ID (creator) – DO NOT change host based on who sends message
       const hostId = this.roomHosts.get(data.roomId);
       const isHost = hostId === userId;
 
@@ -527,7 +524,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
         replyToId: null,
       };
 
-      // ✅ Broadcast to all in room (including sender)
+      // ✅ Broadcast to ALL clients in the room (including sender)
       this.server
         .to(`voice:${data.roomId}`)
         .emit('voice:chat', messageWithHost);
